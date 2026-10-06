@@ -1,0 +1,68 @@
+# ── MARK LV — what never belongs in the repository ──────────────────────────
+# Everything listed here is created by the app on first run. A fresh clone with
+# none of it present boots straight to the setup screen, which is the intended
+# first experience — so nothing here needs to be committed, and some of it must
+# never be.
+
+# ── Secrets. Committing any of these publishes them. ──────────────────────────
+# Comments must sit on their own line: git has no end-of-line comments, so
+# "config/api_keys.json   # ..." used to be a pattern that matched nothing and
+# left the API key file free to be committed.
+# Your Gemini API key, plus per-plugin credentials
+config/api_keys.json
+# The dashboard's TLS private key and certificate
+config/certs/
+# A LINKED WhatsApp session — committing it hands somebody your WhatsApp
+# account, not just a key
+config/whatsapp_web/
+# Google OAuth tokens (Gmail / Calendar plugins) and client secrets
+**/token*.json
+**/client_secret*.json
+*credentials*.json
+.env
+.env.*
+
+# ── Personal data the assistant accumulates about you ─────────────────────────
+memory/long_term.json
+memory/*.db
+# The copy MEMORY → RESET ALL keeps of what it erased
+memory/long_term.backup.json
+
+# ── Python build noise ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Editors and operating systems ─────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Runtime output ────────────────────────────────────────────────────────────
+*.log
+logs/
+downloads/
+screenshots/
+
+# ── Claude's working folder ───────────────────────────────────────────────────
+# Agent scratch files, skill drafts and the cached skill catalogue. The skills
+# themselves (workspace/.claude/skills/) stay trackable on purpose: a skill is
+# code you may want to keep and share.
+workspace/*
+!workspace/.claude/
+workspace/.claude/*
+!workspace/.claude/skills/
