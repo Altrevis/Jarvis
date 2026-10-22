@@ -17,6 +17,18 @@ CLAUDE ANSWERS FIRST
 
     Set "ai_engine": "gemini" to switch Claude off without uninstalling it.
 
+A FREE GATEWAY CAN ANSWER BEFORE CLAUDE
+    When a gateway is configured (core/gateway.py: OmniRoute or FreeLLMAPI,
+    pooling the free tiers of dozens of providers), the tiers listed in
+    "gateway_tiers" — FAST by default — try it first: those are the frequent,
+    simple calls, and each one Claude does not take is subscription quota left
+    for the agent jobs. Every other text call keeps Claude first and reaches the
+    gateway only when Claude and the whole Gemini ladder have failed.
+
+        FAST:   gateway -> Claude -> Gemini ladder
+        SMART:  Claude -> Gemini ladder -> gateway
+        SEARCH: Gemini ladder (grounding metadata exists nowhere else)
+
 WHY THIS EXISTS
     The live conversation runs on the Live API and is not what this file is
     about. Everything else — reading a screenshot, parsing a flight page,
@@ -582,6 +594,46 @@ def _split_for_claude(contents) -> tuple[str, list] | None:
     return (prompt, images) if prompt or images else None
 
 
+def _one_shot_system(config) -> str:
+    """The system prompt for a rung that is not Gemini: the one-shot rules, the
+    caller's own instruction, and the JSON request the REST config carried as a
+    mime type instead of words."""
+    system = _ONE_SHOT_SYSTEM
+    extra = _system_text(config)
+    if extra:
+        system += f"\n\n{extra}"
+    if "json" in str(_config_field(config, "response_mime_type") or ""):
+        system += "\n\nOutput only valid JSON."
+    return system
+
+
+def _gateway_call(contents, tier: str, config, timeout_ms: int):
+    """The free-gateway rung. A _Reply, or None to let the next rung answer."""
+    try:
+        from core import gateway
+    except Exception:
+        return None
+    if not gateway.enabled():
+        return None
+    split = _split_for_claude(contents)     # same shape: text plus images
+    if split is None:
+        return None
+    prompt, images = split
+    if images and not gateway.settings()["vision"]:
+        return None
+    # The gateway fails over between providers on its own, which takes longer
+    # than one model answering; the floor leaves room for one hop.
+    timeout = max(timeout_ms / 1000.0, 15.0)
+    try:
+        text = gateway.ask(prompt, gateway.FAST if tier == FAST else gateway.SMART,
+                           system=_one_shot_system(config), images=images,
+                           timeout=timeout)
+    except Exception as e:
+        print(f"[Gateway] {type(e).__name__}: {str(e)[:160]} — trying the next rung")
+        return None
+    return _Reply(text)
+
+
 def _claude_call(contents, tier: str, config, timeout_ms: int):
     """The Claude rung. A _Reply, or None to let the Gemini ladder answer."""
     try:
@@ -594,13 +646,7 @@ def _claude_call(contents, tier: str, config, timeout_ms: int):
     if split is None:
         return None
     prompt, images = split
-
-    system = _ONE_SHOT_SYSTEM
-    extra = _system_text(config)
-    if extra:
-        system += f"\n\n{extra}"
-    if "json" in str(_config_field(config, "response_mime_type") or ""):
-        system += "\n\nOutput only valid JSON."
+    system = _one_shot_system(config)
 
     claude_tier = claude.FAST if tier == FAST else claude.SMART
     # A Claude call carries ~2s of process start that a Gemini deadline was
@@ -616,23 +662,58 @@ def _claude_call(contents, tier: str, config, timeout_ms: int):
     return _Reply(text)
 
 
+def _gateway_first(tier: str) -> bool:
+    try:
+        from core import gateway
+        return gateway.prefers(tier)
+    except Exception:
+        return False
+
+
 def call(contents, tier: str = FAST, config=None,
          timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = ""):
-    """Run one generation: Claude first, then the Gemini ladder until one answers.
+    """Run one generation: the free gateway when it leads this tier, then
+    Claude, then the Gemini ladder, then the gateway as a last resort.
 
     Returns the SDK's own response object when Gemini answered, so callers that
     need more than the text — grounding metadata, candidates, usage — still get
-    it; a Claude answer comes back as a _Reply carrying the same `.text`, and
-    search, the one caller that reads candidates, never goes to Claude. Returns
-    None when everything failed; the
+    it; a Claude or gateway answer comes back as a _Reply carrying the same
+    `.text`, and search, the one caller that reads candidates, never leaves
+    Gemini. Returns None when everything failed; the
     reason for each is printed, since a silent None during a session nobody can
     debug is how the original problem stayed hidden.
     """
-    if tier != SEARCH and not _wants_search(config):
+    text_call = tier != SEARCH and not _wants_search(config)
+    # Only the named tiers: any other `tier` is a Gemini model the user picked
+    # by name (screen_agent's setting), and that choice is not overridden.
+    gateway_first = text_call and tier in (FAST, SMART) and _gateway_first(tier)
+    if gateway_first:
+        reply = _gateway_call(contents, tier, config, timeout_ms)
+        if reply is not None:
+            return reply
+    if text_call:
         reply = _claude_call(contents, tier, config, timeout_ms)
         if reply is not None:
             return reply
-    return _gemini_call(contents, tier, config, timeout_ms, key)
+    resp = _gemini_call(contents, tier, config, timeout_ms, key)
+    if resp is None and text_call and not gateway_first:
+        resp = _gateway_call(contents, tier, config, timeout_ms)
+    return resp
+
+
+def _record_usage(resp) -> None:
+    """Count a REST answer's tokens (core/usage.py). The Live rung has no usage
+    metadata to give, so it is not counted."""
+    meta = getattr(resp, "usage_metadata", None)
+    if meta is None:
+        return
+    try:
+        from core import usage
+        usage.record("gemini", getattr(meta, "prompt_token_count", 0) or 0,
+                     getattr(meta, "candidates_token_count", 0) or 0,
+                     getattr(meta, "cached_content_token_count", 0) or 0)
+    except Exception:
+        pass
 
 
 def _gemini_call(contents, tier: str, config, timeout_ms: int, key: str):
@@ -665,7 +746,9 @@ def _gemini_call(contents, tier: str, config, timeout_ms: int, key: str):
             kwargs = {"model": model, "contents": contents}
             if config is not None:
                 kwargs["config"] = _without_afc(config)
-            return cl.models.generate_content(**kwargs)
+            resp = cl.models.generate_content(**kwargs)
+            _record_usage(resp)
+            return resp
         except Exception as e:
             msg = str(e)
             if is_quota_error(msg):

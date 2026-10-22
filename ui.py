@@ -2528,21 +2528,52 @@ class ClaudeOverlay(_HudOverlay):
         lay.addLayout(row)
         self._paint_engine()
 
+        def _field(text, placeholder, secret=False):
+            w = QLineEdit(text)
+            if secret:
+                w.setEchoMode(QLineEdit.EchoMode.Password)
+            w.setPlaceholderText(placeholder)
+            w.setFont(QFont("Courier New", 9))
+            w.setFixedHeight(30)
+            w.setStyleSheet(f"""
+                QLineEdit {{ background: #000d12; color: {C.TEXT};
+                    border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}
+                QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
+            """)
+            lay.addWidget(w)
+            return w
+
         _label("CLAUDE TOKEN  (optional)", 8)
-        self._token = QLineEdit(get_claude_token())
-        self._token.setEchoMode(QLineEdit.EchoMode.Password)
-        self._token.setPlaceholderText("sk-ant-oat01-…")
-        self._token.setFont(QFont("Courier New", 9))
-        self._token.setFixedHeight(30)
-        self._token.setStyleSheet(f"""
-            QLineEdit {{ background: #000d12; color: {C.TEXT};
-                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}
-            QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
-        """)
-        lay.addWidget(self._token)
+        self._token = _field(get_claude_token(), "sk-ant-oat01-…", secret=True)
         _label("In a terminal run  claude setup-token , sign in with your Claude "
                "subscription and paste the token it prints. Leave it empty to use "
                "the login Claude Code already has on this computer.", 7)
+
+        # The free gateway: the calls ticked here go to it before Claude, which
+        # leaves the subscription's usage limit for the long jobs.
+        from memory.config_manager import get_gateway_config
+        gw = get_gateway_config()
+        _label("FREE GATEWAY  (optional — OmniRoute or FreeLLMAPI)", 8)
+        self._gw_url = _field(gw["url"], "http://localhost:20128/v1  ·  FreeLLMAPI: :3001/v1")
+        self._gw_key = _field(gw["key"], "the gateway's own API key", secret=True)
+        row = QHBoxLayout(); row.setSpacing(6)
+        self._gw_tiers = set(gw["tiers"])
+        self._tier_btns: dict[str, QPushButton] = {}
+        for key, text in (("fast", "FAST CALLS FIRST"), ("smart", "SMART CALLS FIRST")):
+            b = QPushButton(text)
+            b.setFixedHeight(26)
+            b.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, k=key: self._toggle_tier(k))
+            row.addWidget(b)
+            self._tier_btns[key] = b
+        lay.addLayout(row)
+        self._paint_tiers()
+        _label("Pools the free tiers of many providers behind one endpoint. FAST "
+               "calls (short decisions, extraction) are the frequent ones: sending "
+               "them here first saves the most Claude quota. Empty URL = off.", 7)
+        self._usage = _label("", 7, C.TEXT_MED)
+        self._show_usage()
 
         self._result = _label("", 8, C.TEXT_MED)
         self._result.hide()
@@ -2595,6 +2626,27 @@ class ClaudeOverlay(_HudOverlay):
         self._paint_engine()
         self._commit_engine()
 
+    def _paint_tiers(self):
+        for key, b in self._tier_btns.items():
+            on = key in self._gw_tiers
+            b.setStyleSheet(f"""
+                QPushButton {{ background: {C.PRI_GHO if on else 'transparent'};
+                    color: {C.PRI if on else C.TEXT_DIM};
+                    border: 1px solid {C.PRI if on else C.BORDER}; border-radius: 3px; }}
+                QPushButton:hover {{ border-color: {C.PRI}; }}
+            """)
+
+    def _toggle_tier(self, key: str):
+        self._gw_tiers ^= {key}
+        self._paint_tiers()
+
+    def _show_usage(self):
+        try:
+            from core import usage
+            self._usage.setText(usage.summary_line())
+        except Exception:
+            self._usage.setText("")
+
     def _commit_engine(self):
         from memory.config_manager import get_ai_engine, save_ai_engine
         if get_ai_engine() == self._engine:
@@ -2639,25 +2691,32 @@ class ClaudeOverlay(_HudOverlay):
             f"color: {C.GREEN if ok and not st.get('cooling') else C.ACC}; background: transparent;")
 
     def _save_and_test(self):
-        from memory.config_manager import save_claude_token
+        from memory.config_manager import save_claude_token, save_gateway_config
         self._commit_engine()
         save_claude_token(self._token.text())
+        save_gateway_config(self._gw_url.text(), self._gw_key.text(), self._gw_tiers)
         self._result.setText("Testing…")
         self._result.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
         self._result.show()
         self.adjustSize()
 
         def work():
-            from core import claude
+            from core import claude, gateway
             ok, msg = claude.test()
+            msg = f"{'✓' if ok else '✕'} {msg}"
+            if gateway.settings()["url"]:
+                gw_ok, gw_msg = gateway.test()
+                ok = ok and gw_ok
+                msg += f"\n{'✓' if gw_ok else '✕'} {gw_msg}"
             self._emit_safely(self._test_done, ok, msg)
         threading.Thread(target=work, daemon=True, name="claude-test").start()
 
     def _show_test(self, ok: bool, msg: str):
         engine = "Claude" if self._engine == "claude" else "Gemini only"
-        self._result.setText(f"{'✓' if ok else '✕'} {msg}\nSaved — text calls: {engine}.")
+        self._result.setText(f"{msg}\nSaved — text calls: {engine}.")
         self._result.setStyleSheet(
             f"color: {C.GREEN if ok else C.RED}; background: transparent;")
+        self._show_usage()
         self.adjustSize()
         self._refresh_status()
 

@@ -120,6 +120,16 @@ class Result:
     turns: int = 0
     duration_s: float = 0.0
     denials: list = field(default_factory=list)
+    tokens_in: int = 0       # input, including what was written to the cache
+    tokens_out: int = 0
+    tokens_cached: int = 0   # read back from the prompt cache: far cheaper
+
+
+def _usage_of(result: dict) -> tuple[int, int, int]:
+    u = result.get("usage") or {}
+    return (int(u.get("input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0),
+            int(u.get("output_tokens") or 0),
+            int(u.get("cache_read_input_tokens") or 0))
 
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -341,12 +351,14 @@ def run(prompt: str, *, model: str, system: str = "", append_system: str = "",
         tools: tuple[str, ...] | list[str] = (), allowed: tuple[str, ...] | list[str] = (),
         cwd: Path | None = None, add_dirs: list[str] | None = None,
         setting_sources: str = "", skills: bool = False,
-        timeout: float = 60.0, on_event: Callable[[dict], None] | None = None) -> Result:
+        timeout: float = 60.0, on_event: Callable[[dict], None] | None = None,
+        usage_tag: str = "claude") -> Result:
     """One `claude -p` run, start to finish. Raises ClaudeError on any failure.
 
     `system` replaces Claude Code's own system prompt (one-shot calls);
     `append_system` adds to it (agent runs, which want the agentic prompt).
-    `on_event` sees every stream-json event, for progress reporting."""
+    `on_event` sees every stream-json event, for progress reporting.
+    `usage_tag` is the engine name its tokens are counted under (core/usage)."""
     exe = binary()
     if not exe:
         raise ClaudeError("Claude Code is not installed (no `claude` command found)")
@@ -465,13 +477,22 @@ def run(prompt: str, *, model: str, system: str = "", append_system: str = "",
         tail = "".join(err_tail).strip()[-300:]
         raise ClaudeError(tail or f"Claude Code exited ({proc.returncode}) without an answer")
 
+    # Counted before the error check: a run that ended badly was still billed.
+    tin, tout, tcached = _usage_of(result)
+    try:
+        from core import usage
+        usage.record(usage_tag, tin, tout, tcached)
+    except Exception:
+        pass
+
     text = str(result.get("result") or "").strip()
     if result.get("is_error") or result.get("subtype", "success") != "success":
         raise ClaudeError(text or str(result.get("subtype") or "Claude reported an error"))
     return Result(text=text, cost_usd=float(result.get("total_cost_usd") or 0.0),
                   turns=int(result.get("num_turns") or 0),
                   duration_s=time.monotonic() - t0,
-                  denials=list(result.get("permission_denials") or []))
+                  denials=list(result.get("permission_denials") or []),
+                  tokens_in=tin, tokens_out=tout, tokens_cached=tcached)
 
 
 def ask(prompt: str, tier: str = FAST, system: str = "",
@@ -499,21 +520,22 @@ def ask(prompt: str, tier: str = FAST, system: str = "",
 def agent(task: str, *, append_system: str = "", model: str = "",
           add_dirs: list[str] | None = None, allow_bash: bool = True,
           timeout: float = 600.0,
-          on_event: Callable[[dict], None] | None = None) -> Result:
-    """Claude Code doing a multi-step job in workspace/, with the skills found
-    in workspace/.claude/skills. Blocks until it is done; call it from a worker
-    thread."""
+          on_event: Callable[[dict], None] | None = None,
+          cwd: Path | None = None, extra_bash: tuple[str, ...] = ()) -> Result:
+    """Claude Code doing a multi-step job in workspace/ — or in `cwd`, with the
+    skills found in its .claude/skills — plus `extra_bash` patterns on top of
+    AGENT_BASH. Blocks until it is done; call it from a worker thread."""
     if not _AGENT_SLOTS.acquire(timeout=_SLOT_WAIT):
         raise ClaudeError("two Claude tasks are already running — wait for one to finish")
     try:
         tools = tuple(t for t in AGENT_TOOLS if allow_bash or t != "Bash")
         allowed = tuple(t for t in tools if t != "Bash")
         if allow_bash:
-            allowed += tuple(f"Bash({p})" for p in AGENT_BASH)
+            allowed += tuple(f"Bash({p})" for p in AGENT_BASH + tuple(extra_bash))
         return run(task, model=model or model_for(AGENT), append_system=append_system,
-                   tools=tools, allowed=allowed, add_dirs=add_dirs,
+                   tools=tools, allowed=allowed, add_dirs=add_dirs, cwd=cwd,
                    setting_sources="project", skills=True, timeout=timeout,
-                   on_event=on_event)
+                   on_event=on_event, usage_tag="claude-agent")
     except ClaudeError as e:
         _note_failure(str(e))
         raise

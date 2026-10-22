@@ -27,6 +27,8 @@ memory/long_term.json
 memory/*.db
 # The copy MEMORY → RESET ALL keeps of what it erased
 memory/long_term.backup.json
+# Tokens spent per engine per day (core/usage.py)
+config/usage.json
 
 # ── Python build noise ────────────────────────────────────────────────────────
 __pycache__/

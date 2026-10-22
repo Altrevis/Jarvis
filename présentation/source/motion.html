@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="duration" content="49">
+<title>JARVIS — motion design</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&family=Noto+Sans+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #02080d; --line: #0f3447; --line-2: #1a5c7a;
+  --cyan: #00d4ff; --cyan-dim: #0a8fb0; --orange: #ff7a1a; --green: #00f08a; --yellow: #ffcc00;
+  --text: #e2f8ff; --muted: #8cbccb; --dim: #5f93a3;
+  --head: "Space Grotesk", "Inter", sans-serif; --body: "Inter", sans-serif;
+  --mono: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+body { font-family: var(--body); color: var(--text); }
+#stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0;
+  background: radial-gradient(1200px 800px at 80% 10%, rgba(0, 212, 255, 0.10), transparent 70%),
+              radial-gradient(1000px 700px at 5% 100%, rgba(255, 122, 26, 0.07), transparent 70%), var(--bg); }
+#grid { position: absolute; inset: -240px; opacity: 0;
+  background: linear-gradient(rgba(15, 52, 71, 0.45) 1px, transparent 1px) 0 0 / 120px 120px,
+              linear-gradient(90deg, rgba(15, 52, 71, 0.45) 1px, transparent 1px) 0 0 / 120px 120px; }
+#vignette { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%); }
+.br { position: absolute; width: 64px; height: 64px; border: 3px solid var(--cyan-dim); opacity: 0; }
+.br.tl { left: 56px; top: 48px; border-right: 0; border-bottom: 0; transform-origin: 0 0; }
+.br.tr { right: 56px; top: 48px; border-left: 0; border-bottom: 0; transform-origin: 100% 0; }
+.br.bl { left: 56px; bottom: 48px; border-right: 0; border-top: 0; transform-origin: 0 100%; }
+.br.bp { right: 56px; bottom: 48px; border-left: 0; border-top: 0; transform-origin: 100% 100%; }
+.hud { position: absolute; font: 500 26px/1 var(--mono); letter-spacing: 0.14em; color: var(--dim);
+  text-transform: uppercase; opacity: 0; white-space: nowrap; }
+#hudTL { left: 140px; top: 72px; } #hudTL b { color: var(--cyan); font-weight: 600; }
+#hudTR { right: 140px; top: 72px; color: var(--cyan-dim); }
+#hudBL { left: 140px; bottom: 72px; }
+#bar { position: absolute; left: 140px; right: 140px; bottom: 120px; height: 2px; background: rgba(15, 52, 71, 0.8); opacity: 0; }
+#bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+
+#logo { position: absolute; left: 610px; top: 120px; width: 700px; height: 700px; opacity: 0; overflow: visible; }
+
+.scene { position: absolute; inset: 0; visibility: hidden; }
+.kicker { font: 600 30px/1 var(--mono); color: var(--orange); letter-spacing: 0.18em; text-transform: uppercase; }
+.title { font: 700 76px/1.05 var(--head); letter-spacing: -0.025em; color: var(--text); }
+.title em { font-style: normal; color: var(--cyan); }
+
+/* A — boot */
+#bootText { position: absolute; left: 0; right: 0; top: 830px; text-align: center; font: 500 32px/1 var(--mono);
+  letter-spacing: 0.2em; color: var(--cyan); }
+#bootText .ok { color: var(--green); }
+#hey { position: absolute; left: 0; right: 0; top: 806px; text-align: center; font: 500 64px/1 var(--head); color: var(--text); opacity: 0; }
+#wave { position: absolute; left: 660px; width: 600px; top: 910px; height: 80px; display: flex; align-items: center; justify-content: space-between; }
+#wave i { display: block; width: 8px; height: 6px; border-radius: 4px; background: var(--cyan); }
+
+/* B — identity */
+#bKick { position: absolute; left: 0; right: 0; top: 290px; text-align: center; color: var(--cyan); }
+#word { position: absolute; left: 0; right: 0; top: 340px; display: flex; justify-content: center; }
+#word .m { display: block; overflow: hidden; height: 300px; }
+#word .m span { display: block; font: 700 300px/1 var(--head); letter-spacing: -0.04em; color: var(--text); }
+#bSub { position: absolute; left: 0; right: 0; top: 700px; text-align: center; font: 400 46px/1.3 var(--body); color: var(--muted); }
+#bSub strong { color: var(--cyan); font-weight: 600; }
+
+/* C — verbs */
+.vrow { position: absolute; left: 220px; right: 220px; height: 150px; display: flex; align-items: center; }
+.vrow .w { font: 700 132px/1 var(--head); letter-spacing: -0.03em; width: 760px; white-space: nowrap; }
+.vrow .d { font: 500 32px/1.3 var(--mono); color: var(--muted); letter-spacing: 0.02em; white-space: nowrap; }
+.vrow .w span { color: var(--cyan); }
+.vrow.last .w span { color: var(--orange); }
+
+/* D — architecture */
+#dHead { position: absolute; left: 140px; top: 150px; }
+#dHead .title { margin-top: 20px; }
+#dSvg { position: absolute; inset: 0; overflow: visible; }
+.node { position: absolute; border: 2px solid var(--line-2); border-radius: 16px; padding: 24px 28px;
+  background: rgba(5, 19, 28, 0.96); opacity: 0; }
+.node .k { font: 600 24px/1 var(--mono); letter-spacing: 0.12em; color: var(--dim); text-transform: uppercase; margin-bottom: 12px; }
+.node h3 { font: 700 38px/1.1 var(--head); margin: 0 0 8px; white-space: nowrap; }
+.node p { font: 400 28px/1.3 var(--body); color: var(--muted); margin: 0; }
+.node.live { border-color: var(--cyan); box-shadow: 0 0 70px rgba(0, 212, 255, 0.22); }
+.node.live h3 { color: var(--cyan); font-size: 50px; }
+.node.cl { border-color: rgba(255, 122, 26, 0.75); } .node.cl h3 { color: var(--orange); }
+.node.gw { border-color: rgba(0, 240, 138, 0.6); } .node.gw h3 { color: var(--green); }
+.node.eng { padding: 20px 26px; } .node.eng h3 { font-size: 34px; } .node.eng p { font-size: 26px; white-space: nowrap; }
+.node.hud2 { border-style: dashed; }
+
+/* E — capabilities */
+#eHead { position: absolute; left: 140px; top: 150px; }
+#eHead .title { margin-top: 20px; }
+.chip { position: absolute; width: 380px; height: 140px; border: 2px solid var(--line); border-radius: 16px;
+  background: rgba(5, 19, 28, 0.94); padding: 26px 28px; opacity: 0; display: flex; align-items: center; gap: 22px; }
+.chip svg { width: 52px; height: 52px; flex: none; }
+.chip h3 { font: 700 36px/1.1 var(--head); margin: 0; }
+.chip.new { border-color: rgba(255, 122, 26, 0.7); } .chip.new h3 { color: var(--orange); }
+
+/* F — numbers */
+#fHead { position: absolute; left: 0; right: 0; top: 190px; text-align: center; }
+#fHead .title { margin-top: 20px; }
+.cnt { position: absolute; top: 450px; width: 520px; text-align: center; opacity: 0; }
+.cnt .v { font: 700 150px/1 var(--head); letter-spacing: -0.035em; white-space: nowrap; }
+.cnt .l { font: 400 36px/1.35 var(--body); color: var(--muted); margin-top: 26px; }
+.cnt .rule { height: 3px; margin: 0 auto 34px; width: 0; background: currentColor; }
+#fFoot { position: absolute; left: 0; right: 0; top: 860px; text-align: center; font: 500 30px/1 var(--mono);
+  color: var(--dim); letter-spacing: 0.14em; text-transform: uppercase; opacity: 0; }
+
+/* G — Ydays */
+#gHead { position: absolute; left: 140px; top: 150px; }
+#gHead .title { margin-top: 20px; }
+.gcard { position: absolute; top: 400px; width: 520px; height: 330px; border: 2px solid var(--line-2); border-radius: 18px;
+  background: linear-gradient(180deg, rgba(7, 26, 38, 0.96), rgba(5, 19, 28, 0.96)); padding: 40px 40px; opacity: 0; }
+.gcard .n { font: 600 28px/1 var(--mono); letter-spacing: 0.12em; margin-bottom: 26px; }
+.gcard h3 { font: 700 42px/1.08 var(--head); margin: 0 0 18px; white-space: nowrap; }
+.gcard p { font: 400 32px/1.38 var(--body); color: var(--muted); margin: 0; }
+.gcard.a { border-color: rgba(0, 240, 138, 0.6); } .gcard.a .n, .gcard.a h3 { color: var(--green); }
+.gcard.b { border-color: rgba(0, 212, 255, 0.6); } .gcard.b .n, .gcard.b h3 { color: var(--cyan); }
+.gcard.c { border-color: rgba(255, 122, 26, 0.7); } .gcard.c .n, .gcard.c h3 { color: var(--orange); }
+#pipe { position: absolute; left: 140px; right: 140px; top: 790px; display: flex; align-items: center; justify-content: center; }
+#pipe .s { font: 500 32px/1 var(--body); padding: 18px 24px; border-radius: 12px; border: 2px solid var(--line-2);
+  color: var(--muted); background: rgba(5, 19, 28, 0.94); opacity: 0; white-space: nowrap; }
+#pipe .j { width: 34px; height: 2px; background: var(--line-2); opacity: 0; }
+
+/* H — outro */
+#hWord { position: absolute; left: 0; right: 0; top: 640px; display: flex; justify-content: center; }
+#hWord .m { display: block; overflow: hidden; height: 170px; }
+#hWord .m span { display: block; font: 700 170px/1 var(--head); letter-spacing: -0.04em; color: var(--text); }
+#hTag { position: absolute; left: 0; right: 0; top: 836px; text-align: center; font: 500 40px/1.2 var(--head); color: var(--muted); opacity: 0; }
+#hTag span { color: var(--cyan); }
+#hCred { position: absolute; left: 0; right: 0; top: 912px; text-align: center; font: 500 26px/1 var(--mono);
+  letter-spacing: 0.16em; color: var(--dim); text-transform: uppercase; opacity: 0; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="grid"></div>
+
+  <svg id="logo" viewBox="-350 -350 700 700" aria-hidden="true">
+    <defs>
+      <radialGradient id="glow" cx="0" cy="0" r="340" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#00d4ff" stop-opacity="0.28"/>
+        <stop offset="0.55" stop-color="#00d4ff" stop-opacity="0.05"/>
+        <stop offset="1" stop-color="#00d4ff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <circle id="lgGlow" r="340" fill="url(#glow)"/>
+    <circle id="lgOuter" r="300" fill="none" stroke="#00d4ff" stroke-width="9" transform="rotate(-90)"/>
+    <g id="lgDashG"><circle id="lgDash" r="276" fill="none" stroke="#0a8fb0" stroke-width="2" stroke-dasharray="4 13"/></g>
+    <circle id="lgInner" r="222" fill="none" stroke="#1a5c7a" stroke-width="4" transform="rotate(90)"/>
+    <g id="lgSpokes" stroke="#00d4ff" stroke-width="5" stroke-linecap="round" opacity="0.9">
+      <line x1="0" y1="-196" x2="0" y2="-104"/><line x1="0" y1="104" x2="0" y2="196"/>
+      <line x1="-196" y1="0" x2="-104" y2="0"/><line x1="104" y1="0" x2="196" y2="0"/>
+      <line x1="-139" y1="-80" x2="-73" y2="-42"/><line x1="73" y1="42" x2="139" y2="80"/>
+      <line x1="139" y1="-80" x2="73" y2="-42"/><line x1="-73" y1="42" x2="-139" y2="80"/>
+    </g>
+    <g id="lgTicks" stroke="#1a5c7a" stroke-width="3">
+      <line x1="0" y1="-336" x2="0" y2="-316"/><line x1="0" y1="316" x2="0" y2="336"/>
+      <line x1="-336" y1="0" x2="-316" y2="0"/><line x1="316" y1="0" x2="336" y2="0"/>
+    </g>
+    <g id="lgCore">
+      <circle r="72" fill="#02080d" stroke="#00d4ff" stroke-width="13"/>
+      <circle id="lgDot" r="42" fill="#cdeeff"/>
+    </g>
+  </svg>
+
+  <!-- A — boot -->
+  <div class="scene" id="sA">
+    <div id="bootText"></div>
+    <div id="hey">« Hey Jarvis »</div>
+    <div id="wave"></div>
+  </div>
+
+  <!-- B — identity -->
+  <div class="scene" id="sB">
+    <div id="bKick" class="kicker">Projet Ydays · Ynov M1</div>
+    <div id="word"></div>
+    <div id="bSub">L'assistant vocal qui <strong>pilote l'ordinateur.</strong></div>
+  </div>
+
+  <!-- C — verbs -->
+  <div class="scene" id="sC">
+    <div class="vrow" style="top:190px"><div class="w">Il <span>entend.</span></div><div class="d">voix temps réel · « Hey Jarvis »</div></div>
+    <div class="vrow" style="top:360px"><div class="w">Il <span>voit.</span></div><div class="d">l'écran · la webcam</div></div>
+    <div class="vrow" style="top:530px"><div class="w">Il <span>parle.</span></div><div class="d">5 voix · toutes les langues</div></div>
+    <div class="vrow last" style="top:700px"><div class="w">Il <span>agit.</span></div><div class="d">applis · fichiers · web · projets</div></div>
+  </div>
+
+  <!-- D — architecture -->
+  <div class="scene" id="sD">
+    <div id="dHead"><div class="kicker">Comment ça marche</div><div class="title">Une voix rapide, <em>un cerveau</em> qui réfléchit.</div></div>
+    <svg id="dSvg" viewBox="0 0 1920 1080">
+      <g fill="none" stroke="#00d4ff" stroke-width="3">
+        <path class="dl" d="M470 600 H572"/>
+        <path class="dl" d="M990 600 H1062"/>
+        <path class="dl" d="M1390 600 H1440 M1440 455 V765"/>
+        <path class="dl" d="M1440 455 H1482"/>
+        <path class="dl" d="M1440 610 H1482"/>
+        <path class="dl" d="M1440 765 H1482"/>
+        <path class="dl" d="M785 730 V802"/>
+        <path class="dl" d="M1226 690 V802"/>
+      </g>
+      <path id="r0" d="M470 600 H1440 V455 H1482" fill="none" stroke="none"/>
+      <path id="r1" d="M470 600 H1440 V610 H1482" fill="none" stroke="none"/>
+      <path id="r2" d="M470 600 H1440 V765 H1482" fill="none" stroke="none"/>
+      <circle class="pulse" r="9" fill="#ff7a1a"/>
+      <circle class="pulse" r="9" fill="#00d4ff"/>
+      <circle class="pulse" r="9" fill="#00f08a"/>
+    </svg>
+    <div class="node" id="nYou" style="left:130px; top:510px; width:340px;"><div class="k">Entrées</div><h3>Vous</h3><p>micro, clavier, téléphone</p></div>
+    <div class="node live" id="nLive" style="left:580px; top:470px; width:410px; height:260px;"><div class="k">Temps réel</div><h3>Gemini Live</h3><p>écoute, parle et choisit l'outil</p></div>
+    <div class="node" id="nTools" style="left:1070px; top:510px; width:320px; height:180px;"><div class="k">Outils</div><h3>23 actions</h3><p>+ plugins</p></div>
+    <div class="node eng cl" id="nCl" style="left:1490px; top:395px; width:320px;"><h3>Claude Code</h3><p>réflexion, agents</p></div>
+    <div class="node eng" id="nGe" style="left:1490px; top:550px; width:320px;"><h3>Gemini</h3><p>9 modèles en relais</p></div>
+    <div class="node eng gw" id="nGw" style="left:1490px; top:705px; width:320px;"><h3>Passerelle</h3><p>offres gratuites</p></div>
+    <div class="node hud2" id="nHud" style="left:580px; top:810px; width:810px;"><h3>HUD&nbsp;: avatar, vidéo, panneau</h3></div>
+  </div>
+
+  <!-- E — capabilities -->
+  <div class="scene" id="sE">
+    <div id="eHead"><div class="kicker">Ce qu'il sait faire</div><div class="title">Tout ce qu'il fait <em>pilote l'ordinateur.</em></div></div>
+    <div id="chips"></div>
+  </div>
+
+  <!-- F — numbers -->
+  <div class="scene" id="sF">
+    <div id="fHead"><div class="kicker">En chiffres</div><div class="title">Mesuré, <em>pas supposé.</em></div></div>
+    <div class="cnt" style="left:140px; color:#00d4ff"><div class="rule"></div><div class="v" id="c0">0</div><div class="l">modèles Gemini, classés par vitesse</div></div>
+    <div class="cnt" style="left:700px; color:#ffcc00"><div class="rule"></div><div class="v" id="c1">0</div><div class="l">gagnées par appel quand un modèle tombe</div></div>
+    <div class="cnt" style="left:1260px; color:#ff7a1a"><div class="rule"></div><div class="v" id="c2">0</div><div class="l">tokens de moins à chaque session</div></div>
+    <div id="fFoot">41 → 8 périphériques audio · plugins 211 → 39 ms</div>
+  </div>
+
+  <!-- G — Ydays -->
+  <div class="scene" id="sG">
+    <div id="gHead"><div class="kicker">Apport Ydays</div><div class="title">Moins de tokens. <em>Plus de projets.</em></div></div>
+    <div class="gcard a" style="left:140px"><div class="n">01</div><h3>Passerelle gratuite</h3><p>Les petits appels ne coûtent plus de quota Claude.</p></div>
+    <div class="gcard b" style="left:700px"><div class="n">02</div><h3>Compteur de tokens</h3><p>Chaque moteur, chaque jour&nbsp;: un chiffre.</p></div>
+    <div class="gcard c" style="left:1260px"><div class="n">03</div><h3>Projets logiciels</h3><p>De l'idée au code, une étape à la fois.</p></div>
+    <div id="pipe"></div>
+  </div>
+
+  <!-- H — outro -->
+  <div class="scene" id="sH">
+    <div id="hWord"></div>
+    <div id="hTag">Il entend. Il voit. Il parle. <span>Il agit.</span></div>
+    <div id="hCred">Projet Ydays · Ynov M1 · 2026 – 2027</div>
+  </div>
+
+  <div id="vignette"></div>
+  <div class="br tl"></div><div class="br tr"></div><div class="br bl"></div><div class="br bp"></div>
+  <div class="hud" id="hudTL"><b>JARVIS</b> // Projet Ydays</div>
+  <div class="hud" id="hudTR">T+00:00.0</div>
+  <div class="hud" id="hudBL">01 · Initialisation</div>
+  <div id="bar"><i></i></div>
+</div>
+
+<script>
+const D = 49;
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const C = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const P = (t, a, b) => C((t - a) / (b - a));
+const E = {
+  out: x => 1 - Math.pow(1 - x, 3),
+  out5: x => 1 - Math.pow(1 - x, 5),
+  io: x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+  back: x => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+  expo: x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x),
+};
+const L = (a, b, x) => a + (b - a) * x;
+// visible between a and b, fading in over fi and out over fo
+const win = (t, a, b, fi = 0.4, fo = 0.4) => Math.min(E.out(P(t, a, a + fi)), 1 - E.io(P(t, b - fo, b)));
+const show = (el, o) => { el.style.visibility = o > 0.001 ? 'visible' : 'hidden'; el.style.opacity = o; };
+
+// ── build the generated parts ──────────────────────────────────────────────
+const wave = $('#wave');
+for (let i = 0; i < 40; i++) wave.appendChild(document.createElement('i'));
+const bars = [...wave.children];
+
+function letters(host, word) {
+  for (const ch of word) {
+    const m = document.createElement('span'); m.className = 'm';
+    const s = document.createElement('span'); s.textContent = ch;
+    m.appendChild(s); host.appendChild(m);
+  }
+  return [...host.querySelectorAll('.m > span')];
+}
+const bLetters = letters($('#word'), 'JARVIS');
+const hLetters = letters($('#hWord'), 'JARVIS');
+
+const ICONS = {
+  sys: '<rect x="4" y="7" width="36" height="24" rx="3"/><path d="M15 38h14M22 31v7"/>',
+  files: '<path d="M5 11h13l4 5h17v20H5z"/>',
+  web: '<circle cx="22" cy="22" r="17"/><path d="M5 22h34M22 5c-9 9-9 25 0 34M22 5c9 9 9 25 0 34"/>',
+  eye: '<path d="M3 22s7-12 19-12 19 12 19 12-7 12-19 12S3 22 3 22z"/><circle cx="22" cy="22" r="6"/>',
+  mem: '<circle cx="22" cy="22" r="6"/><circle cx="22" cy="22" r="16" stroke-dasharray="5 5"/>',
+  video: '<rect x="4" y="8" width="36" height="28" rx="4"/><path d="M18 15v14l12-7z"/>',
+  search: '<circle cx="19" cy="19" r="12"/><path d="M28 28l11 11"/>',
+  doc: '<path d="M10 4h17l8 8v28H10z"/><path d="M16 22h13M16 29h13"/>',
+  clock: '<circle cx="22" cy="24" r="15"/><path d="M22 15v9l6 4"/>',
+  msg: '<path d="M5 8h34v22H18l-9 7v-7H5z"/>',
+  phone: '<rect x="12" y="3" width="20" height="38" rx="4"/><path d="M19 35h6"/>',
+  code: '<path d="M14 12L4 22l10 10M30 12l10 10-10 10M25 6l-6 32"/>',
+};
+const CAPS = [['sys', 'Système'], ['files', 'Fichiers'], ['web', 'Navigateur'], ['eye', 'Vision'],
+  ['mem', 'Mémoire'], ['video', 'Vidéo'], ['search', 'Recherche'], ['doc', 'Documents'],
+  ['clock', 'Rappels'], ['msg', 'Messages'], ['phone', 'Télécommande'], ['code', 'Projets']];
+const chipsHost = $('#chips');
+CAPS.forEach(([ic, name], i) => {
+  const d = document.createElement('div');
+  const isNew = ic === 'code';
+  d.className = 'chip' + (isNew ? ' new' : '');
+  d.style.left = (140 + (i % 4) * 420) + 'px';
+  d.style.top = (400 + Math.floor(i / 4) * 170) + 'px';
+  d.innerHTML = `<svg viewBox="0 0 44 44" fill="none" stroke="${isNew ? '#ff7a1a' : '#00d4ff'}" stroke-width="3">${ICONS[ic]}</svg><h3>${name}</h3>`;
+  chipsHost.appendChild(d);
+});
+const chips = [...chipsHost.children];
+
+const STEPS = ['spec', 'architect', 'design', 'build', 'backend', 'test', 'diff'];
+const pipe = $('#pipe');
+STEPS.forEach((s, i) => {
+  if (i) { const j = document.createElement('span'); j.className = 'j'; pipe.appendChild(j); }
+  const c = document.createElement('span'); c.className = 's'; c.textContent = s; pipe.appendChild(c);
+});
+const pSteps = [...pipe.querySelectorAll('.s')], pJoins = [...pipe.querySelectorAll('.j')];
+
+// logo stroke lengths
+const ring = (id) => { const el = $(id); const r = +el.getAttribute('r'); const len = 2 * Math.PI * r;
+  el.style.strokeDasharray = `${len} ${len}`; return [el, len]; };
+const [lgOuter, lenOuter] = ring('#lgOuter');
+const [lgInner, lenInner] = ring('#lgInner');
+const dLines = $$('.dl').map(p => { const len = p.getTotalLength(); p.style.strokeDasharray = `${len} ${len}`; return [p, len]; });
+const routes = ['#r0', '#r1', '#r2'].map(id => { const p = $(id); return [p, p.getTotalLength()]; });
+const pulses = $$('.pulse');
+
+const S = { A: $('#sA'), B: $('#sB'), C: $('#sC'), D: $('#sD'), E: $('#sE'), F: $('#sF'), G: $('#sG'), H: $('#sH') };
+const LABELS = [[0, '01 · Initialisation'], [5, '02 · Identité'], [9.6, '03 · Mission'], [15.6, '04 · Architecture'],
+  [23.6, '05 · Capacités'], [28.8, '06 · Mesures'], [35, '07 · Apport Ydays'], [43.2, '08 · Fin']];
+const BOOT = 'INITIALISATION DES SYSTÈMES';
+const fr = (x, d) => x.toFixed(d).replace('.', ',');
+const thousands = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+
+// ── one frame ──────────────────────────────────────────────────────────────
+function render(t) {
+  // chrome
+  $('#grid').style.opacity = 0.9 * E.out(P(t, 0, 1.4));
+  $('#grid').style.transform = `translate(${(-t * 7) % 120}px, ${(-t * 3.5) % 120}px)`;
+  $$('.br').forEach((b, i) => { const k = E.out(P(t, 0.15 + i * 0.08, 0.9 + i * 0.08)); b.style.opacity = k; b.style.transform = `scale(${L(0.2, 1, k)})`; });
+  const chromeO = E.out(P(t, 0.8, 1.6));
+  ['#hudTL', '#hudTR', '#hudBL', '#bar'].forEach(s => $(s).style.opacity = chromeO);
+  const sec = Math.min(t, D);
+  $('#hudTR').textContent = `T+${String(Math.floor(sec / 60)).padStart(2, '0')}:${fr(sec % 60, 1).padStart(4, '0')}`;
+  let lab = LABELS[0][1]; for (const [at, s] of LABELS) if (t >= at) lab = s;
+  $('#hudBL').textContent = lab;
+  $('#bar i').style.width = (100 * C(t / D)) + '%';
+
+  // logo — boot, faint behind the name, gone, then back for the outro
+  const late = t > 30;
+  const draw = late ? E.io(P(t, 43.4, 44.8)) : E.io(P(t, 0.3, 2.1));
+  lgOuter.style.strokeDashoffset = lenOuter * (1 - draw);
+  lgInner.style.strokeDashoffset = lenInner * (1 - draw);
+  $('#lgDash').style.opacity = late ? E.out(P(t, 44.0, 44.8)) : E.out(P(t, 1.0, 1.8));
+  $('#lgDashG').setAttribute('transform', `rotate(${t * 14})`);
+  $('#lgTicks').style.opacity = late ? E.out(P(t, 44.2, 44.8)) : E.out(P(t, 1.6, 2.2));
+  const sp = late ? E.out(P(t, 44.2, 45.0)) : E.out(P(t, 1.4, 2.4));
+  $('#lgSpokes').setAttribute('transform', `scale(${sp})`);
+  $('#lgSpokes').style.opacity = 0.9 * sp;
+  const cr = late ? E.back(P(t, 44.5, 45.2)) : E.back(P(t, 1.9, 2.6));
+  const talk = t > 3.4 && t < 5.2 ? 0.07 * Math.abs(Math.sin(t * 11)) * Math.sin(P(t, 3.4, 5.2) * Math.PI) : 0;
+  $('#lgCore').setAttribute('transform', `scale(${cr + talk})`);
+  $('#lgGlow').style.opacity = late ? E.out(P(t, 44.6, 45.6)) : E.out(P(t, 2.0, 3.0));
+  let lo, cx, cy, sc;
+  if (!late) {
+    const k = E.io(P(t, 4.9, 6.0));
+    lo = Math.min(E.out(P(t, 0.2, 0.6)), L(1, 0.13, k)) * (1 - E.io(P(t, 9.0, 9.6)));
+    cx = 960; cy = L(470, 540, k); sc = L(1, 1.6, k);
+  } else {
+    lo = E.out(P(t, 43.3, 43.8)); cx = 960; cy = 400; sc = 0.62;
+  }
+  const logo = $('#logo');
+  logo.style.opacity = lo;
+  logo.style.transform = `translate(${cx - 960}px, ${cy - 470}px) scale(${sc})`;
+
+  // A — boot
+  const oA = win(t, 0, 5.5, 0.01, 0.5);
+  show(S.A, oA);
+  if (oA > 0) {
+    const n = Math.floor(P(t, 1.2, 2.5) * BOOT.length);
+    const ok = t > 2.7 ? ' <span class="ok">· OK</span>' : '';
+    const bt = $('#bootText');
+    bt.innerHTML = BOOT.slice(0, n) + (n < BOOT.length && n > 0 && Math.floor(t * 6) % 2 ? '▌' : '') + ok;
+    bt.style.opacity = E.out(P(t, 1.1, 1.3)) * (1 - E.io(P(t, 3.1, 3.4)));
+    const hy = E.out(P(t, 3.3, 3.9));
+    $('#hey').style.opacity = hy;
+    $('#hey').style.transform = `translateY(${L(24, 0, hy)}px)`;
+    const env = Math.sin(P(t, 3.4, 5.3) * Math.PI);
+    bars.forEach((b, i) => {
+      const bell = Math.exp(-Math.pow((i - 19.5) / 11, 2));
+      const h = 6 + 70 * env * bell * (0.35 + 0.65 * Math.abs(Math.sin(t * 9 + i * 0.7) * Math.cos(t * 4.3 + i * 0.31)));
+      b.style.height = h + 'px';
+      b.style.opacity = 0.35 + 0.65 * env;
+    });
+    $('#wave').style.opacity = E.out(P(t, 3.3, 3.8));
+  }
+
+  // B — the name
+  const oB = (t > 4.9 && t < 9.7) ? 1 : 0;
+  show(S.B, oB);
+  if (oB) {
+    bLetters.forEach((s, i) => {
+      const a = E.expo(P(t, 5.25 + i * 0.07, 6.15 + i * 0.07));
+      const b = E.io(P(t, 9.0 + i * 0.04, 9.45 + i * 0.04));
+      s.style.transform = `translateY(${(1 - a) * 110 - b * 110}%)`;
+    });
+    const k = win(t, 5.9, 9.4, 0.5, 0.35);
+    $('#bKick').style.opacity = k;
+    const sb = win(t, 6.4, 9.4, 0.6, 0.35);
+    $('#bSub').style.opacity = sb;
+    $('#bSub').style.transform = `translateY(${L(26, 0, E.out(P(t, 6.4, 7.0)))}px)`;
+  }
+
+  // C — four verbs
+  const oC = win(t, 9.45, 15.6, 0.01, 0.5);
+  show(S.C, oC);
+  if (oC > 0) {
+    const rows = $$('.vrow');
+    rows.forEach((r, i) => {
+      const t0 = 9.5 + i * 1.22;
+      const a = E.out(P(t, t0, t0 + 0.55));
+      const next = i < 3 ? 9.5 + (i + 1) * 1.22 : 99;
+      const dim = 1 - 0.66 * E.io(P(t, next, next + 0.3)) * (1 - E.io(P(t, 14.3, 14.7)));
+      const ex = E.io(P(t, 15.05 + i * 0.05, 15.5 + i * 0.05));
+      r.style.opacity = a * dim * (1 - ex);
+      r.querySelector('.w').style.transform = `translateX(${L(-70, 0, a) + ex * 60}px)`;
+      const d = r.querySelector('.d');
+      const da = E.out(P(t, t0 + 0.3, t0 + 0.8));
+      d.style.opacity = da; d.style.transform = `translateX(${L(30, 0, da)}px)`;
+    });
+  }
+
+  // D — architecture
+  const oD = win(t, 15.6, 23.6, 0.01, 0.5);
+  show(S.D, oD);
+  if (oD > 0) {
+    const h = E.out(P(t, 15.8, 16.4));
+    $('#dHead').style.opacity = h; $('#dHead').style.transform = `translateY(${L(30, 0, h)}px)`;
+    const nodeAt = { nYou: 16.3, nLive: 17.0, nTools: 17.8, nCl: 18.6, nGe: 18.8, nGw: 19.0, nHud: 19.6 };
+    for (const id in nodeAt) {
+      const k = E.out(P(t, nodeAt[id], nodeAt[id] + 0.5));
+      const el = document.getElementById(id);
+      el.style.opacity = k; el.style.transform = `translateY(${L(26, 0, k)}px) scale(${L(0.96, 1, k)})`;
+    }
+    const lineAt = [[16.7, 17.0], [17.5, 17.8], [18.2, 18.6], [18.5, 18.8], [18.65, 18.95], [18.8, 19.1], [19.3, 19.6], [19.4, 19.7]];
+    dLines.forEach(([p, len], i) => { p.style.strokeDashoffset = len * (1 - E.io(P(t, ...lineAt[i]))); });
+    pulses.forEach((c, k) => {
+      const start = 19.9 + k * 0.55, period = 1.65;
+      if (t < start || t > 22.9) { c.style.opacity = 0; return; }
+      const ph = ((t - start) % period) / period;
+      const [route, len] = routes[k];
+      const pt = route.getPointAtLength(E.io(ph) * len);
+      c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y);
+      c.style.opacity = Math.min(1, ph * 8, (1 - ph) * 8);
+    });
+    const ex = E.io(P(t, 23.1, 23.6));
+    S.D.style.transform = `scale(${L(1, 0.98, ex)})`;
+  }
+
+  // E — capabilities
+  const oE = win(t, 23.6, 28.8, 0.01, 0.5);
+  show(S.E, oE);
+  if (oE > 0) {
+    const h = E.out(P(t, 23.8, 24.4));
+    $('#eHead').style.opacity = h; $('#eHead').style.transform = `translateY(${L(30, 0, h)}px)`;
+    chips.forEach((c, i) => {
+      const k = P(t, 24.2 + i * 0.09, 24.75 + i * 0.09);
+      c.style.opacity = E.out(k);
+      c.style.transform = `translateY(${L(30, 0, E.out(k))}px) scale(${L(0.88, 1, E.back(k))})`;
+    });
+  }
+
+  // F — numbers
+  const oF = win(t, 28.8, 35.0, 0.01, 0.5);
+  show(S.F, oF);
+  if (oF > 0) {
+    const h = E.out(P(t, 29.0, 29.6));
+    $('#fHead').style.opacity = h; $('#fHead').style.transform = `translateY(${L(30, 0, h)}px)`;
+    $$('.cnt').forEach((c, i) => {
+      const s = 29.6 + i * 0.45;
+      const a = E.out(P(t, s, s + 0.5));
+      c.style.opacity = a; c.style.transform = `translateY(${L(40, 0, a)}px)`;
+      c.querySelector('.rule').style.width = (120 * E.out(P(t, s + 0.1, s + 0.8))) + 'px';
+      const k = E.out5(P(t, s, s + 1.5));
+      const v = c.querySelector('.v');
+      if (i === 0) v.textContent = String(Math.round(9 * k));
+      if (i === 1) v.innerHTML = fr(11.2 * k, 1) + '<span style="font-size:84px">\u00a0s</span>';
+      if (i === 2) v.textContent = '≈\u00a0' + thousands(Math.round(1000 * k / 10) * 10);
+    });
+    $('#fFoot').style.opacity = E.out(P(t, 31.6, 32.2));
+  }
+
+  // G — Ydays
+  const oG = win(t, 35.0, 43.2, 0.01, 0.5);
+  show(S.G, oG);
+  if (oG > 0) {
+    const h = E.out(P(t, 35.2, 35.8));
+    $('#gHead').style.opacity = h; $('#gHead').style.transform = `translateY(${L(30, 0, h)}px)`;
+    $$('.gcard').forEach((c, i) => {
+      const k = E.out(P(t, 35.7 + i * 0.35, 36.4 + i * 0.35));
+      c.style.opacity = k; c.style.transform = `translateY(${L(60, 0, k)}px)`;
+    });
+    pSteps.forEach((s, i) => {
+      const k = E.out(P(t, 38.0 + i * 0.1, 38.4 + i * 0.1));
+      s.style.opacity = k; s.style.transform = `translateY(${L(20, 0, k)}px)`;
+      const on = P(t, 39.0 + i * 0.32, 39.25 + i * 0.32);
+      s.style.borderColor = on > 0 ? `rgba(255, 122, 26, ${L(0.35, 0.9, on)})` : '';
+      s.style.color = on > 0.5 ? '#ff7a1a' : '';
+      s.style.boxShadow = on > 0 ? `0 0 ${Math.round(28 * on)}px rgba(255, 122, 26, 0.25)` : '';
+    });
+    pJoins.forEach((j, i) => {
+      j.style.opacity = E.out(P(t, 38.05 + i * 0.1, 38.45 + i * 0.1));
+      j.style.background = t > 39.25 + (i + 1) * 0.32 ? '#ff7a1a' : '';
+    });
+  }
+
+  // H — outro
+  const oH = t > 43.2 ? 1 : 0;
+  show(S.H, oH);
+  if (oH) {
+    hLetters.forEach((s, i) => {
+      const a = E.expo(P(t, 45.0 + i * 0.07, 45.9 + i * 0.07));
+      s.style.transform = `translateY(${(1 - a) * 110}%)`;
+    });
+    const g = E.out(P(t, 45.8, 46.4));
+    $('#hTag').style.opacity = g; $('#hTag').style.transform = `translateY(${L(20, 0, g)}px)`;
+    $('#hCred').style.opacity = E.out(P(t, 46.3, 46.9));
+  }
+}
+
+// Plays on its own in a browser (click to replay); the MP4 renderer drives the
+// same clock frame by frame.
+let t0 = null, running = true;
+function frame(ts) {
+  if (t0 === null) t0 = ts;
+  const t = (ts - t0) / 1000;
+  render(Math.min(t, D));
+  running = t < D;
+  if (running) requestAnimationFrame(frame);
+}
+// fit the 1920x1080 stage to any window (a no-op at 1920x1080)
+function fit() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  $('#stage').style.transform = `translate(${(innerWidth - 1920 * s) / 2}px, ${(innerHeight - 1080 * s) / 2}px) scale(${s})`;
+}
+addEventListener('resize', fit);
+fit();
+render(0);
+requestAnimationFrame(frame);
+addEventListener('click', () => { t0 = null; if (!running) { running = true; requestAnimationFrame(frame); } });
+</script>
+</body>
+</html>

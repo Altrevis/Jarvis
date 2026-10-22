@@ -588,7 +588,7 @@ def code_helper(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "code_helper",
-    "description": "Writes, edits, explains, runs, or builds code files.",
+    "description": "Writes, edits, explains, runs, or builds single code files. A whole app or site is the project tool.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

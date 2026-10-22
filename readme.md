@@ -310,6 +310,53 @@ Switch back to Gemini for everything with **⚙ SETUP → ✦ CLAUDE → GEMINI 
 
 ---
 
+## 🪙 Free gateway — fewer Claude tokens
+
+Most one-shot calls are small and frequent: a phone ringing, a button to find, a line to classify. Each one used to be a `claude -p` run counted against your subscription's usage limit — the same limit documents and projects need. A self-hosted gateway pools the **free tiers of dozens of providers** (Groq, Cerebras, Mistral, OpenRouter's free models…) behind one OpenAI-compatible endpoint and fails over between them by itself. JARVIS speaks to either of these:
+
+| Gateway | Start it | URL to paste |
+|---|---|---|
+| [OmniRoute](https://github.com/diegosouzapw/OmniRoute) | `npm install -g omniroute && omniroute` | `http://localhost:20128/v1` |
+| [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) | `curl -fsSL https://freellmapi.co/install.sh \| bash` (Docker) | `http://localhost:3001/v1` |
+
+Add your provider keys on the gateway's dashboard, copy the gateway's own key, then **⚙ SETUP → ✦ CLAUDE → FREE GATEWAY**: URL, key, **SAVE & TEST**.
+
+| Call | Order |
+|---|---|
+| FAST (default for the gateway) | gateway → Claude → Gemini ladder |
+| SMART | Claude → Gemini ladder → gateway (tick *SMART CALLS FIRST* to lead with the gateway) |
+| Grounded search | Gemini only — grounding metadata exists nowhere else |
+
+A gateway that is down, out of quota or refusing the key is rested (2 to 30 minutes) instead of being retried on every call, and a reply cut off by a provider's output cap is never used. Images stay off the gateway unless `"gateway_vision": true`. Prompt compression (OmniRoute's RTK/Caveman engines, FreeLLMAPI's pipeline) is set on the gateway's dashboard; `"gateway_compression"` sends a per-request override. Model names, kind and extra headers can be overridden in `config/api_keys.json` (`gateway_model_fast`, `gateway_model_smart`, `gateway_kind`, `gateway_headers`) — see `core/gateway.py`.
+
+The same panel shows **today's tokens per engine** (Claude, Claude tasks, gateway, Gemini), counted in `config/usage.json`, so a saving is a number rather than a feeling.
+
+---
+
+## 🏗️ Projects
+
+*"Crée un projet : une appli de budget pour étudiants"* — *"Continue le projet budget"* — *"Où en est mon clone de Calendly ?"*
+
+`ask_claude`'s task mode forgets the job when it ends. A **project** is a codebase that grows over days, so each one gets a folder in `Documents/JARVIS/projects/<name>/`, a state file, and a method: the **[Replica](https://github.com/Jakeschincariol/replica-skill)** skills (MIT, vendored in `skill_packs/replica/`), where each step reads what the previous one wrote in `replica/`.
+
+| Kind | Steps |
+|---|---|
+| Clone of an existing app (`clone_of`) | recon → architect → design → build → backend → test → diff → entrepreneur → brand → launch |
+| Your own idea (`description`) | spec → architect → design → build → backend → test → diff |
+
+`spec` turns your description into the recon map and feature matrix Replica expects, so the whole pack works on original projects too. `deploy` never runs on its own: asked for by name, it stops at the checklist of what only you can do.
+
+Built to spend as little as it can:
+
+- **One step per request** by default (`steps` up to 3). You decide when the next hour of Opus is worth it.
+- **Every step is a fresh session.** What carries over is `replica/*.md` and a short, prompt-cached `CLAUDE.md` brief — not a transcript replayed on every turn.
+- **Only architect, build, backend and free-form changes get the agent model** (Opus by default); research, specs, tests and scoring run on Sonnet. Override with `project_models` / `project_model_light`.
+- **The pack lives in each project's `.claude/skills/`**, not in `workspace/`, so ordinary `ask_claude` tasks never pay for eleven skill descriptions they do not use.
+
+`status` shows each step, the feature-parity score (`parity.py`: features done, must-haves done) and the Claude tokens the project has used. Projects need Claude (they are hidden in *Gemini only* mode).
+
+---
+
 ## 📋 Requirements
 
 | Requirement | Details |
@@ -354,13 +401,18 @@ Mark LV/
 │   ├── send_message.py       # Messaging integration
 │   ├── weather_report.py     # Live weather data
 │   ├── video_player.py       # Plays video on the HUD, where the avatar normally is
+│   ├── project.py            # Software projects, one folder each, built step by step with Replica
 │   └── desktop.py            # Desktop and taskbar control
+├── skill_packs/
+│   └── replica/              # Replica skills (MIT), copied into each project — not loaded globally
 ├── memory/
 │   ├── memory_manager.py     # Load/save long_term.json — sessions, monitors, identity
 │   ├── config_manager.py     # api_keys.json access — key, OS, name, voice, colour, toggles
 │   └── long_term.json        # Persistent store — created on first run
 ├── core/
 │   ├── gemini.py             # One place for every one-shot Gemini call — model ladder, timeouts, cooldowns
+│   ├── gateway.py            # Free LLM gateway (OmniRoute / FreeLLMAPI) — a rung before or after Claude
+│   ├── usage.py              # Tokens spent per engine per day (config/usage.json)
 │   ├── prompt.txt            # All prompt wording — {tokens} are filled from the live system at startup
 │   ├── avatar.py             # Avatar renderer — lighting, pose, expression, mouth (QPainter)
 │   ├── avatar_mesh.py        # Head geometry — loads the face, generates skull/neck/rigs

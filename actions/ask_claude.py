@@ -154,7 +154,8 @@ TOOL = {
         "data processing, using one of the installed skills; it runs in the "
         "background and you are told when it finishes. Not for small talk, and "
         "not when a dedicated tool exists (documents: create_document, videos: "
-        "create_motion_video, skills: manage_skills, live news: web_search)."
+        "create_motion_video, skills: manage_skills, live news: web_search, "
+        "an app or site the user is building: project)."
     ),
     "parameters": {
         "type": "OBJECT",

@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>JARVIS — Projet Ydays</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Noto+Sans+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #02080d;
+  --panel: #05131c;
+  --panel-2: #071a26;
+  --line: #0f3447;
+  --line-2: #1a5c7a;
+  --cyan: #00d4ff;
+  --cyan-dim: #0a8fb0;
+  --orange: #ff7a1a;
+  --yellow: #ffcc00;
+  --green: #00f08a;
+  --red: #ff4466;
+  --text: #e2f8ff;
+  --muted: #8cbccb;
+  --dim: #5f93a3;
+  --head: "Space Grotesk", "Inter", sans-serif;
+  --body: "Inter", sans-serif;
+  --mono: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #000; }
+body { font-family: var(--body); color: var(--text); }
+
+section.slide {
+  position: relative; width: 1920px; height: 1080px; overflow: hidden;
+  background:
+    radial-gradient(1100px 700px at 82% 18%, rgba(0, 212, 255, 0.10), transparent 70%),
+    radial-gradient(900px 600px at 8% 100%, rgba(255, 122, 26, 0.06), transparent 70%),
+    linear-gradient(rgba(15, 52, 71, 0.35) 1px, transparent 1px) 0 0 / 120px 120px,
+    linear-gradient(90deg, rgba(15, 52, 71, 0.35) 1px, transparent 1px) 0 0 / 120px 120px,
+    var(--bg);
+  padding: 0 120px;
+}
+/* corner brackets — the HUD's frame */
+section.slide::before, section.slide::after {
+  content: ""; position: absolute; width: 56px; height: 56px; border: 3px solid var(--cyan-dim);
+}
+section.slide::before { left: 48px; top: 40px; border-right: 0; border-bottom: 0; }
+section.slide::after { right: 48px; bottom: 40px; border-left: 0; border-top: 0; }
+
+.chrome {
+  position: absolute; left: 120px; right: 120px; top: 56px; height: 40px;
+  display: flex; justify-content: space-between; align-items: center;
+  font: 500 24px/1 var(--mono); letter-spacing: 0.12em; color: var(--dim); text-transform: uppercase;
+}
+.chrome b { color: var(--cyan); font-weight: 600; }
+.foot {
+  position: absolute; left: 120px; right: 120px; bottom: 52px;
+  display: flex; justify-content: space-between; align-items: center;
+  font: 400 24px/1 var(--mono); color: var(--dim); letter-spacing: 0.06em;
+}
+.kicker {
+  font: 600 26px/1 var(--mono); color: var(--orange); letter-spacing: 0.16em; text-transform: uppercase;
+  margin: 0 0 22px;
+}
+h2 {
+  font: 700 84px/1.02 var(--head); letter-spacing: -0.025em; margin: 0; color: var(--text);
+}
+h2 em { font-style: normal; color: var(--cyan); }
+.lead { font: 400 36px/1.4 var(--body); color: var(--muted); margin: 0; }
+.lead strong { color: var(--text); font-weight: 600; }
+.head { position: absolute; left: 120px; right: 120px; top: 168px; }
+
+.card {
+  background: linear-gradient(180deg, rgba(7, 26, 38, 0.92), rgba(5, 19, 28, 0.92));
+  border: 2px solid var(--line); border-radius: 14px; padding: 32px 34px;
+}
+.card h3 { font: 700 36px/1.15 var(--head); margin: 0 0 12px; color: var(--text); }
+.card p { font: 400 28px/1.4 var(--body); margin: 0; color: var(--muted); }
+.tag {
+  display: inline-block; font: 600 24px/1 var(--mono); letter-spacing: 0.08em; padding: 10px 16px;
+  border-radius: 8px; border: 2px solid var(--line-2); color: var(--cyan); text-transform: uppercase;
+}
+.tag.o { color: var(--orange); border-color: rgba(255, 122, 26, 0.55); }
+.tag.g { color: var(--green); border-color: rgba(0, 240, 138, 0.5); }
+.mono { font-family: var(--mono); }
+
+/* ── 1 cover ───────────────────────────────────────── */
+.cover-logo { position: absolute; right: 40px; top: 150px; width: 820px; height: 820px; }
+.cover-text { position: absolute; left: 120px; top: 250px; width: 900px; }
+.cover-text .kicker { color: var(--cyan); margin-bottom: 30px; }
+.cover-text h1 {
+  font: 700 250px/0.86 var(--head); letter-spacing: -0.045em; margin: 0 0 48px; color: var(--text);
+}
+.cover-text .lead { font-size: 44px; line-height: 1.32; color: var(--muted); max-width: 860px; }
+.cover-text .lead strong { color: var(--cyan); font-weight: 600; }
+.cover-meta { position: absolute; left: 120px; bottom: 120px; display: flex; gap: 18px; }
+
+/* ── 2 idea ───────────────────────────────────────── */
+.idea-left { position: absolute; left: 120px; top: 470px; width: 700px; }
+.idea-left p { font: 400 34px/1.45 var(--body); color: var(--muted); margin: 0 0 28px; }
+.idea-left p strong { color: var(--text); font-weight: 600; }
+.verbs { position: absolute; left: 900px; right: 120px; top: 410px; display: grid;
+  grid-template-columns: 1fr 1fr; gap: 24px; }
+.verbs .card { padding: 28px 32px; }
+.verbs .vn { font: 600 24px/1 var(--mono); color: var(--cyan); letter-spacing: 0.1em; margin-bottom: 18px; }
+.verbs h3 { font-size: 44px; }
+
+/* ── 3 base ───────────────────────────────────────── */
+.two { position: absolute; left: 120px; right: 120px; top: 440px; display: grid;
+  grid-template-columns: 1fr 1fr; gap: 40px; }
+.col-title { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+.col-title h3 { font: 700 40px/1 var(--head); margin: 0; }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { position: relative; font: 400 30px/1.35 var(--body); color: var(--muted); padding: 14px 0 14px 40px;
+  border-top: 2px solid var(--line); }
+.list li:last-child { border-bottom: 2px solid var(--line); }
+.list li::before { content: ""; position: absolute; left: 4px; top: 29px; width: 14px; height: 14px;
+  border: 3px solid var(--cyan-dim); border-radius: 50%; }
+.list.o li::before { border-color: var(--orange); background: rgba(255, 122, 26, 0.25); }
+.list li strong { color: var(--text); font-weight: 600; }
+
+/* ── 4 architecture ───────────────────────────────── */
+.arch { position: absolute; inset: 0; }
+.arch svg { position: absolute; inset: 0; }
+.node { position: absolute; border: 2px solid var(--line-2); border-radius: 14px; padding: 24px 26px;
+  background: rgba(5, 19, 28, 0.94); }
+.node .k { font: 600 24px/1 var(--mono); letter-spacing: 0.1em; color: var(--dim); text-transform: uppercase; margin-bottom: 12px; }
+.node h3 { font: 700 34px/1.1 var(--head); margin: 0 0 10px; }
+.node p { font: 400 26px/1.35 var(--body); margin: 0; color: var(--muted); }
+.node.live { border-color: var(--cyan); box-shadow: 0 0 60px rgba(0, 212, 255, 0.18); }
+.node.live h3 { color: var(--cyan); font-size: 44px; }
+.node.claude { border-color: rgba(255, 122, 26, 0.7); }
+.node.claude h3 { color: var(--orange); }
+.node.gw { border-color: rgba(0, 240, 138, 0.55); }
+.node.gw h3 { color: var(--green); }
+.node.eng h3 { font-size: 31px; white-space: nowrap; }
+.node.eng p { font-size: 25px; }
+.node.hud { border-style: dashed; }
+
+/* ── 5 capabilities ───────────────────────────────── */
+.caps { position: absolute; left: 120px; right: 120px; top: 350px; display: grid;
+  grid-template-columns: repeat(4, 1fr); gap: 22px; }
+.cap { display: grid; grid-template-columns: 40px 1fr; column-gap: 16px; align-items: center;
+  border: 2px solid var(--line); border-radius: 14px; padding: 24px 26px;
+  background: rgba(5, 19, 28, 0.9); min-height: 168px; }
+.cap .ic { width: 40px; height: 40px; }
+.cap h3 { font: 700 30px/1.1 var(--head); margin: 0; }
+.cap p { grid-column: 1 / -1; margin-top: 12px !important; align-self: start; }
+.cap p { font: 400 25px/1.35 var(--body); margin: 0; color: var(--muted); }
+.cap.new { border-color: rgba(255, 122, 26, 0.6); }
+.cap.new h3 { color: var(--orange); }
+
+/* ── 6 ladder ─────────────────────────────────────── */
+.ladder-left { position: absolute; left: 120px; top: 420px; width: 700px; }
+.ladder-left .lead { font-size: 30px; margin-bottom: 28px; }
+.cool { width: 100%; border-collapse: collapse; }
+.cool td { font: 400 28px/1.3 var(--body); color: var(--muted); padding: 13px 0; border-top: 2px solid var(--line); }
+.cool tr:last-child td { border-bottom: 2px solid var(--line); }
+.cool td:first-child { color: var(--text); font-weight: 500; }
+.cool td:last-child { text-align: right; font-family: var(--mono); color: var(--yellow); font-weight: 600; }
+.rungs { position: absolute; left: 920px; right: 120px; top: 300px; }
+.rung { display: grid; grid-template-columns: 56px 420px 1fr; align-items: center; height: 66px;
+  border-bottom: 2px solid var(--line); }
+.rung .i { font: 600 24px/1 var(--mono); color: var(--dim); }
+.rung .m { font: 400 25px/1 var(--mono); color: var(--text); }
+.rung .bar { position: relative; height: 26px; display: flex; align-items: center; gap: 16px; }
+.rung .bar span.b { display: block; height: 22px; border-radius: 4px; background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
+.rung .bar span.t { font: 600 24px/1 var(--mono); color: var(--cyan); white-space: nowrap; }
+.rung.down .m { color: var(--dim); }
+.rung.down .bar span.t { color: var(--red); font-weight: 400; }
+.ladder-big { position: absolute; left: 120px; top: 812px; width: 720px; display: flex; align-items: center; gap: 28px; }
+.ladder-big .n { font: 700 104px/1 var(--head); color: var(--yellow); letter-spacing: -0.03em; white-space: nowrap; }
+.ladder-big .l { font: 400 28px/1.35 var(--body); color: var(--muted); }
+
+/* ── 7 gateway ────────────────────────────────────── */
+.gw-intro { position: absolute; left: 120px; top: 350px; width: 1680px; }
+.lanes { position: absolute; left: 120px; right: 120px; top: 500px; }
+.lane { display: grid; grid-template-columns: 330px 1fr; align-items: center; padding: 20px 0;
+  border-top: 2px solid var(--line); }
+.lane:last-child { border-bottom: 2px solid var(--line); }
+.lane .who h3 { font: 700 34px/1.1 var(--head); margin: 0 0 6px; }
+.lane .who p { font: 400 25px/1.3 var(--body); margin: 0; color: var(--dim); }
+.chain { display: flex; align-items: center; gap: 0; }
+.chip { font: 600 30px/1 var(--head); padding: 20px 28px; border-radius: 12px; border: 2px solid; white-space: nowrap; }
+.chip.gw { color: var(--green); border-color: rgba(0, 240, 138, 0.6); background: rgba(0, 240, 138, 0.06); }
+.chip.cl { color: var(--orange); border-color: rgba(255, 122, 26, 0.65); background: rgba(255, 122, 26, 0.06); }
+.chip.ge { color: var(--cyan); border-color: rgba(0, 212, 255, 0.6); background: rgba(0, 212, 255, 0.06); }
+.arrow { width: 84px; height: 24px; flex: none; }
+.gw-note { position: absolute; left: 120px; right: 120px; bottom: 112px; font: 400 28px/1.4 var(--body); color: var(--muted); }
+.gw-note strong { color: var(--text); font-weight: 600; }
+
+/* ── 8 usage ──────────────────────────────────────── */
+.usage-left { position: absolute; left: 120px; top: 400px; width: 800px; }
+.usage-left .list li { font-size: 30px; }
+.json { position: absolute; left: 1000px; right: 120px; top: 380px; border: 2px solid var(--line-2);
+  border-radius: 14px; background: rgba(1, 8, 13, 0.95); padding: 30px 36px; }
+.json .file { font: 600 24px/1 var(--mono); color: var(--dim); letter-spacing: 0.06em; margin-bottom: 22px;
+  padding-bottom: 18px; border-bottom: 2px solid var(--line); }
+.json pre { margin: 0; font: 400 26px/1.42 var(--mono); color: var(--muted); white-space: pre; }
+.json .k { color: var(--cyan); }
+.json .s { color: var(--green); }
+.json .c { color: var(--dim); }
+.engines { position: absolute; left: 120px; top: 880px; display: flex; gap: 14px; }
+
+/* ── 9 projects ───────────────────────────────────── */
+.quote { font: 500 34px/1.3 var(--head); color: var(--text); margin: 0; }
+.quote span { color: var(--orange); }
+.pipes { position: absolute; left: 120px; right: 120px; top: 424px; }
+.pipe { margin-bottom: 26px; }
+.pipe .lbl { font: 600 24px/1 var(--mono); color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 14px; }
+.steps { display: flex; align-items: center; flex-wrap: nowrap; }
+.step { font: 500 27px/1 var(--body); padding: 14px 18px; border-radius: 10px; border: 2px solid var(--line-2);
+  color: var(--text); background: rgba(5, 19, 28, 0.9); white-space: nowrap; }
+.step.h { border-color: var(--orange); color: var(--orange); }
+.step.spec { border-color: var(--green); color: var(--green); }
+.sep { width: 22px; height: 2px; background: var(--line-2); flex: none; }
+.legend { display: flex; gap: 34px; font: 400 25px/1 var(--body); color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 22px; height: 22px; border-radius: 5px; border: 2px solid; vertical-align: -4px; margin-right: 10px; }
+.sober { position: absolute; left: 120px; right: 120px; bottom: 100px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+.sober .card { padding: 26px 28px; }
+.sober .card h3 { font-size: 30px; white-space: nowrap; }
+.sober .card p { font-size: 25px; }
+
+/* ── 10 safety ────────────────────────────────────── */
+.three { position: absolute; left: 120px; right: 120px; top: 440px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.three .card { min-height: 470px; padding: 40px 38px; }
+.three .card .ic { width: 64px; height: 64px; margin-bottom: 28px; }
+.three .card h3 { font-size: 40px; margin-bottom: 18px; }
+.three .card p { font-size: 29px; }
+
+/* ── 11 numbers ───────────────────────────────────── */
+.nums { position: absolute; left: 120px; right: 120px; top: 380px; display: grid;
+  grid-template-columns: repeat(3, 1fr); column-gap: 60px; row-gap: 50px; }
+.num { border-top: 3px solid var(--line-2); padding-top: 26px; }
+.num .v { font: 700 104px/1 var(--head); letter-spacing: -0.03em; color: var(--cyan); margin-bottom: 16px; white-space: nowrap; }
+.num .v small { font-size: 56px; letter-spacing: 0; }
+.num.o .v { color: var(--orange); }
+.num.y .v { color: var(--yellow); }
+.num p { font: 400 28px/1.4 var(--body); color: var(--muted); margin: 0; }
+
+/* ── 12 demo ──────────────────────────────────────── */
+.demo { position: absolute; left: 120px; right: 120px; top: 370px; }
+.cmd { display: grid; grid-template-columns: 940px 1fr; gap: 40px; align-items: center; padding: 26px 0;
+  border-top: 2px solid var(--line); }
+.cmd:last-child { border-bottom: 2px solid var(--line); }
+.cmd .say { font: 500 34px/1.25 var(--head); color: var(--text); }
+.cmd .say::before { content: "›"; color: var(--cyan); margin-right: 18px; font-weight: 700; }
+.cmd .does { font: 400 27px/1.35 var(--body); color: var(--muted); }
+
+/* ── 13 end ───────────────────────────────────────── */
+.end-logo { position: absolute; left: 50%; top: 150px; width: 300px; height: 300px; margin-left: -150px; }
+.end { position: absolute; left: 120px; right: 120px; top: 490px; text-align: center; }
+.end h2 { font-size: 132px; margin-bottom: 18px; }
+.end .lead { font-size: 36px; }
+.road { position: absolute; left: 120px; right: 120px; top: 760px; text-align: center; }
+.road .lbl { font: 600 24px/1 var(--mono); color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 20px; }
+.road .row { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.road .step { font-size: 26px; }
+.credits { position: absolute; left: 120px; right: 120px; bottom: 74px; text-align: center; font: 400 24px/1.4 var(--body); color: var(--dim); }
+</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900&family=Space+Grotesk:ital,wght@0,300;0,400;0,500;0,600;0,700&family=Inter:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap">
+</head>
+<body>
+
+<!-- ════════════════ 1 — COVER ════════════════ -->
+<section class="slide" id="s1">
+  <div class="chrome"><span><b>JARVIS</b> · Projet Ydays</span><span>01 / 13</span></div>
+  <svg class="cover-logo" viewBox="0 0 900 900" aria-hidden="true">
+    <defs>
+      <radialGradient id="cg" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.22"/>
+        <stop offset="60%" stop-color="#00d4ff" stop-opacity="0.04"/>
+        <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <circle cx="450" cy="450" r="440" fill="url(#cg)"/>
+    <circle cx="450" cy="450" r="400" fill="none" stroke="#00d4ff" stroke-width="10"/>
+    <circle cx="450" cy="450" r="372" fill="none" stroke="#0a8fb0" stroke-width="2" stroke-dasharray="4 14"/>
+    <circle cx="450" cy="450" r="300" fill="none" stroke="#1a5c7a" stroke-width="5"/>
+    <g stroke="#00d4ff" stroke-width="6" stroke-linecap="round" opacity="0.85">
+      <line x1="450" y1="190" x2="450" y2="310"/><line x1="450" y1="590" x2="450" y2="710"/>
+      <line x1="190" y1="450" x2="310" y2="450"/><line x1="590" y1="450" x2="710" y2="450"/>
+      <line x1="266" y1="345" x2="360" y2="398"/><line x1="540" y1="502" x2="634" y2="555"/>
+      <line x1="634" y1="345" x2="540" y2="398"/><line x1="360" y1="502" x2="266" y2="555"/>
+    </g>
+    <g stroke="#1a5c7a" stroke-width="3">
+      <line x1="450" y1="40" x2="450" y2="66"/><line x1="450" y1="834" x2="450" y2="860"/>
+      <line x1="40" y1="450" x2="66" y2="450"/><line x1="834" y1="450" x2="860" y2="450"/>
+    </g>
+    <circle cx="450" cy="450" r="96" fill="#02080d" stroke="#00d4ff" stroke-width="16"/>
+    <circle cx="450" cy="450" r="56" fill="#cdeeff"/>
+  </svg>
+  <div class="cover-text">
+    <p class="kicker">Ynov M1 · Ydays 2026 – 2027</p>
+    <h1>JARVIS</h1>
+    <p class="lead">L'assistant vocal qui <strong>entend, voit, parle — et pilote l'ordinateur.</strong></p>
+  </div>
+  <div class="cover-meta"><span class="tag">Python · PyQt6</span><span class="tag">Gemini Live</span><span class="tag o">Claude Code</span><span class="tag g">Windows · macOS · Linux</span></div>
+  <aside class="notes">Bonjour. Nous présentons Jarvis, un assistant vocal en temps réel qui ne se contente pas de répondre&nbsp;: il agit sur l'ordinateur. On lui parle, il ouvre des applications, range des fichiers, lit l'écran, joue une vidéo, et peut même mener un projet logiciel étape par étape. Le projet tourne sur Windows, macOS et Linux.</aside>
+</section>
+
+<!-- ════════════════ 2 — L'IDÉE ════════════════ -->
+<section class="slide" id="s2">
+  <div class="chrome"><span><b>JARVIS</b> · L'idée</span><span>02 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Le constat</p>
+    <h2>Un assistant qui <em>agit</em>,<br>pas seulement qui répond.</h2>
+  </div>
+  <div class="idea-left">
+    <p>Les assistants IA vivent dans un onglet&nbsp;: on tape, ils répondent, <strong>on copie-colle</strong>.</p>
+    <p>Jarvis vit sur la machine. On lui parle, et <strong>il le fait</strong> — puis il montre le résultat sur son propre écran.</p>
+  </div>
+  <div class="verbs">
+    <div class="card"><div class="vn">01</div><h3>Entendre</h3><p>Voix en temps réel, «&nbsp;Hey Jarvis&nbsp;», Ctrl + Espace.</p></div>
+    <div class="card"><div class="vn">02</div><h3>Voir</h3><p>L'écran et la webcam, sur demande.</p></div>
+    <div class="card"><div class="vn">03</div><h3>Parler</h3><p>5&nbsp;voix, toutes les langues, un avatar qui articule.</p></div>
+    <div class="card"><div class="vn">04</div><h3>Agir</h3><p>Applis, fichiers, navigateur, réglages, projets.</p></div>
+  </div>
+  <aside class="notes">Le point de départ&nbsp;: les assistants IA actuels restent dans une fenêtre de discussion. On leur pose une question, ils répondent, et c'est à nous de faire le travail. Jarvis prend le problème à l'envers&nbsp;: il entend, il voit, il parle, et surtout il agit directement sur l'ordinateur.</aside>
+</section>
+
+<!-- ════════════════ 3 — POINT DE DÉPART ════════════════ -->
+<section class="slide" id="s3">
+  <div class="chrome"><span><b>JARVIS</b> · Point de départ</span><span>03 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Un fork open source</p>
+    <h2>Construit sur <em>Mark LV</em>, poussé plus loin.</h2>
+  </div>
+  <div class="two">
+    <div>
+      <div class="col-title"><span class="tag">Hérité</span><h3>La base Mark LV</h3></div>
+      <ul class="list">
+        <li><strong>HUD PyQt6</strong> et avatar holographique, rendu sans GPU</li>
+        <li><strong>Gemini Live</strong>&nbsp;: audio natif, faible latence</li>
+        <li><strong>23&nbsp;actions</strong> auto-découvertes, plugins en un fichier</li>
+        <li><strong>Mémoire</strong> locale, annulation, confirmation réelle</li>
+      </ul>
+    </div>
+    <div>
+      <div class="col-title"><span class="tag o">Apport Ydays</span><h3>Ce que nous ajoutons</h3></div>
+      <ul class="list o">
+        <li><strong>Passerelle gratuite</strong> pour les petits appels</li>
+        <li><strong>Compteur de tokens</strong> par moteur et par jour</li>
+        <li><strong>Projets logiciels</strong> menés étape par étape</li>
+        <li>Objectif&nbsp;: <strong>dépenser moins de tokens</strong>, faire plus</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>Mark LV — FatihMakes · licence CC BY-NC 4.0</span><span>Replica — licence MIT</span></div>
+  <aside class="notes">Nous ne sommes pas partis de zéro&nbsp;: Jarvis est un fork de Mark LV, un assistant open source publié par FatihMakes sous licence Creative Commons non commerciale. Il apporte l'interface, l'avatar, la voix temps réel et une vingtaine d'actions. Notre travail Ydays porte sur deux axes&nbsp;: réduire la consommation de tokens, et permettre à Jarvis de mener de vrais projets logiciels sur plusieurs jours.</aside>
+</section>
+
+<!-- ════════════════ 4 — ARCHITECTURE ════════════════ -->
+<section class="slide" id="s4">
+  <div class="chrome"><span><b>JARVIS</b> · Architecture</span><span>04 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Comment ça marche</p>
+    <h2>Une voix rapide, <em>un cerveau</em> qui réfléchit.</h2>
+  </div>
+  <div class="arch">
+    <svg viewBox="0 0 1920 1080" aria-hidden="true">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="#00d4ff"/>
+        </marker>
+      </defs>
+      <path d="M1380 560 H1416 M1416 474 V846" stroke="#00d4ff" stroke-width="3" fill="none"/>
+      <g stroke="#00d4ff" stroke-width="3" fill="none" marker-end="url(#ah)">
+        <path d="M460 560 H552"/>
+        <path d="M960 560 H1032"/>
+        <path d="M1416 474 H1452"/>
+        <path d="M1416 660 H1452"/>
+        <path d="M1416 846 H1452"/>
+        <path d="M760 710 V782"/>
+        <path d="M1210 690 V782"/>
+      </g>
+    </svg>
+    <div class="node" style="left:120px; top:440px; width:340px;">
+      <div class="k">Entrées</div>
+      <h3>Vous</h3>
+      <p>Micro, «&nbsp;Hey Jarvis&nbsp;», clavier, téléphone via QR code</p>
+    </div>
+    <div class="node live" style="left:560px; top:420px; width:400px; height:290px;">
+      <div class="k">Temps réel</div>
+      <h3>Gemini Live</h3>
+      <p>Écoute, parle, comprend la demande et choisit l'outil — dans toutes les langues.</p>
+    </div>
+    <div class="node" style="left:1040px; top:470px; width:340px;">
+      <div class="k">Outils</div>
+      <h3>23&nbsp;actions + plugins</h3>
+      <p>Système, fichiers, web, vision, vidéo…</p>
+    </div>
+    <div class="node eng claude" style="left:1460px; top:400px; width:340px; padding:20px 24px;">
+      <h3>Claude Code</h3>
+      <p>Réflexion, agents, documents, projets</p>
+    </div>
+    <div class="node eng" style="left:1460px; top:586px; width:340px; padding:20px 24px;">
+      <h3>Échelle Gemini</h3>
+      <p>9&nbsp;modèles classés par vitesse</p>
+    </div>
+    <div class="node eng gw" style="left:1460px; top:772px; width:340px; padding:20px 24px;">
+      <h3>Passerelle gratuite</h3>
+      <p>OmniRoute · FreeLLMAPI</p>
+    </div>
+    <div class="node hud" style="left:560px; top:790px; width:820px; padding:22px 26px;">
+      <div class="k">Sortie</div>
+      <h3>HUD&nbsp;: avatar, vidéo, panneau de contenu</h3>
+    </div>
+  </div>
+  <aside class="notes">L'architecture sépare deux métiers. Gemini Live gère la conversation en temps réel&nbsp;: il écoute, parle et décide quel outil appeler. Les outils agissent sur la machine. Quand une tâche demande de la vraie réflexion, elle part vers un moteur de texte&nbsp;: Claude Code en priorité, une échelle de neuf modèles Gemini en secours, et notre passerelle gratuite pour les petits appels. Le résultat s'affiche sur le HUD.</aside>
+</section>
+
+<!-- ════════════════ 5 — CAPACITÉS ════════════════ -->
+<section class="slide" id="s5">
+  <div class="chrome"><span><b>JARVIS</b> · Capacités</span><span>05 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Ce qu'il sait faire</p>
+    <h2>Tout ce qu'il fait <em>pilote l'ordinateur.</em></h2>
+  </div>
+  <div class="caps">
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><rect x="4" y="7" width="36" height="24" rx="3"/><path d="M15 38h14M22 31v7"/></svg><h3>Système</h3><p>Applis, volume, luminosité, Wi-Fi</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><path d="M5 11h13l4 5h17v20H5z"/></svg><h3>Fichiers</h3><p>Déplacer, renommer, ranger — et annuler</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><circle cx="22" cy="22" r="17"/><path d="M5 22h34M22 5c-9 9-9 25 0 34M22 5c9 9 9 25 0 34"/></svg><h3>Navigateur</h3><p>Ouvrir, chercher, naviguer à la voix</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><path d="M3 22s7-12 19-12 19 12 19 12-7 12-19 12S3 22 3 22z"/><circle cx="22" cy="22" r="6"/></svg><h3>Vision</h3><p>Lit l'écran et la webcam</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><circle cx="22" cy="22" r="6"/><circle cx="22" cy="22" r="16" stroke-dasharray="5 5"/></svg><h3>Mémoire</h3><p>Se souvient de vous, sans limite</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><rect x="4" y="8" width="36" height="28" rx="4"/><path d="M18 15v14l12-7z"/></svg><h3>Vidéo sur le HUD</h3><p>YouTube, fichier ou simple description</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><circle cx="19" cy="19" r="12"/><path d="M28 28l11 11"/></svg><h3>Recherche web</h3><p>Actualités, prix, comparatifs</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><path d="M10 4h17l8 8v28H10z"/><path d="M16 22h13M16 29h13"/></svg><h3>Documents</h3><p>PDF, slides, motion design</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><circle cx="22" cy="24" r="15"/><path d="M22 15v9l6 4"/></svg><h3>Rappels</h3><p>Notifications natives de l'OS</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><path d="M5 8h34v22H18l-9 7v-7H5z"/></svg><h3>Messages</h3><p>WhatsApp, Telegram…</p></div>
+    <div class="cap"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#00d4ff" stroke-width="3"><rect x="12" y="3" width="20" height="38" rx="4"/><path d="M19 35h6"/></svg><h3>Télécommande</h3><p>Depuis le téléphone, via QR code</p></div>
+    <div class="cap new"><svg class="ic" viewBox="0 0 44 44" fill="none" stroke="#ff7a1a" stroke-width="3"><path d="M14 12L4 22l10 10M30 12l10 10-10 10M25 6l-6 32"/></svg><h3>Projets logiciels</h3><p>De l'idée au code, étape par étape</p></div>
+  </div>
+  <aside class="notes">Voici ce que Jarvis sait faire aujourd'hui. Une règle structure le projet&nbsp;: chaque compétence intégrée pilote l'ordinateur. Système, fichiers, navigateur, vision, vidéo, rappels, messages. La dernière case, en orange, est notre ajout&nbsp;: les projets logiciels, que nous détaillerons plus loin.</aside>
+</section>
+
+<!-- ════════════════ 6 — FIABILITÉ ════════════════ -->
+<section class="slide" id="s6">
+  <div class="chrome"><span><b>JARVIS</b> · Fiabilité</span><span>06 / 13</span></div>
+  <div class="head" style="width:760px;">
+    <p class="kicker">Quand un modèle tombe</p>
+    <h2>Une échelle de <em>9&nbsp;modèles</em>.</h2>
+  </div>
+  <div class="ladder-left">
+    <p class="lead">Classés par temps de réponse <strong>mesuré</strong>. Avant&nbsp;: 16&nbsp;fichiers nommaient leur propre modèle, <strong>sans aucun timeout</strong>.</p>
+    <table class="cool">
+      <tr><td>Quota épuisé (429)</td><td>5&nbsp;min</td></tr>
+      <tr><td>Pas de réponse (503 / 504)</td><td>30&nbsp;min</td></tr>
+      <tr><td>Introuvable (404)</td><td>6&nbsp;h</td></tr>
+    </table>
+  </div>
+  <div class="rungs">
+    <div class="rung"><span class="i">01</span><span class="m">gemini-3.5-flash-lite</span><span class="bar"><span class="b" style="width:112px"></span><span class="t">0,56&nbsp;s</span></span></div>
+    <div class="rung"><span class="i">02</span><span class="m">gemini-3.1-flash-lite</span><span class="bar"><span class="b" style="width:120px"></span><span class="t">0,60&nbsp;s</span></span></div>
+    <div class="rung"><span class="i">03</span><span class="m">gemini-flash-lite-latest</span><span class="bar"><span class="b" style="width:120px"></span><span class="t">0,60&nbsp;s</span></span></div>
+    <div class="rung"><span class="i">04</span><span class="m">gemini-2.5-flash</span><span class="bar"><span class="b" style="width:134px"></span><span class="t">0,67&nbsp;s</span></span></div>
+    <div class="rung"><span class="i">05</span><span class="m">gemini-2.5-flash-lite</span><span class="bar"><span class="b" style="width:148px"></span><span class="t">0,74&nbsp;s</span></span></div>
+    <div class="rung"><span class="i">06</span><span class="m">gemini-3.5-flash</span><span class="bar"><span class="b" style="width:226px"></span><span class="t">1,13&nbsp;s</span></span></div>
+    <div class="rung down"><span class="i">07</span><span class="m">gemini-3-flash-preview</span><span class="bar"><span class="t">504 après 14,7&nbsp;s</span></span></div>
+    <div class="rung down"><span class="i">08</span><span class="m">gemini-3.6-flash</span><span class="bar"><span class="t">504 après 12,0&nbsp;s</span></span></div>
+    <div class="rung down"><span class="i">09</span><span class="m">gemini-flash-latest</span><span class="bar"><span class="t">503 indisponible</span></span></div>
+  </div>
+  <div class="ladder-big"><span class="n">11,2&nbsp;s</span><span class="l">gagnées sur chaque appel une fois le modèle en panne mis au repos.</span></div>
+  <aside class="notes">Un assistant vocal ne peut pas rester muet parce qu'un modèle est en panne. Tous les appels passent donc par une échelle de neuf modèles, classés par temps de réponse mesuré. Quand un modèle échoue, l'appel passe au suivant et le modèle fautif est mis au repos&nbsp;: cinq minutes pour un quota, trente minutes pour une panne, six heures pour un modèle introuvable. Résultat mesuré&nbsp;: 11,2&nbsp;secondes gagnées sur chaque appel suivant.</aside>
+</section>
+
+<!-- ════════════════ 7 — PASSERELLE ════════════════ -->
+<section class="slide" id="s7">
+  <div class="chrome"><span><b>JARVIS</b> · Apport Ydays ①</span><span>07 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Moins de tokens Claude</p>
+    <h2>Une <em>passerelle gratuite</em> en premier.</h2>
+  </div>
+  <div class="gw-intro"><p class="lead">Classer une phrase, trouver un bouton à l'écran&nbsp;: chaque petit appel consommait le <strong>quota Claude</strong> dont les documents et les projets ont besoin.</p></div>
+  <div class="lanes">
+    <div class="lane">
+      <div class="who"><h3>Appels rapides</h3><p>les plus fréquents</p></div>
+      <div class="chain">
+        <span class="chip gw">Passerelle gratuite</span>
+        <svg class="arrow" viewBox="0 0 84 24"><path d="M12 12h56" stroke="#1a5c7a" stroke-width="3"/><path d="M64 5l9 7-9 7" fill="none" stroke="#1a5c7a" stroke-width="3"/></svg>
+        <span class="chip cl">Claude</span>
+        <svg class="arrow" viewBox="0 0 84 24"><path d="M12 12h56" stroke="#1a5c7a" stroke-width="3"/><path d="M64 5l9 7-9 7" fill="none" stroke="#1a5c7a" stroke-width="3"/></svg>
+        <span class="chip ge">Échelle Gemini</span>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="who"><h3>Appels réfléchis</h3><p>raisonnement, code</p></div>
+      <div class="chain">
+        <span class="chip cl">Claude</span>
+        <svg class="arrow" viewBox="0 0 84 24"><path d="M12 12h56" stroke="#1a5c7a" stroke-width="3"/><path d="M64 5l9 7-9 7" fill="none" stroke="#1a5c7a" stroke-width="3"/></svg>
+        <span class="chip ge">Échelle Gemini</span>
+        <svg class="arrow" viewBox="0 0 84 24"><path d="M12 12h56" stroke="#1a5c7a" stroke-width="3"/><path d="M64 5l9 7-9 7" fill="none" stroke="#1a5c7a" stroke-width="3"/></svg>
+        <span class="chip gw">Passerelle gratuite</span>
+      </div>
+    </div>
+    <div class="lane">
+      <div class="who"><h3>Recherche ancrée</h3><p>sources web citées</p></div>
+      <div class="chain"><span class="chip ge">Gemini seul</span></div>
+    </div>
+  </div>
+  <div class="gw-note">OmniRoute ou FreeLLMAPI regroupent les <strong>offres gratuites</strong> de dizaines de fournisseurs (Groq, Cerebras, Mistral, OpenRouter…) derrière une seule API compatible OpenAI. Une passerelle en panne est mise au repos 2 à 30&nbsp;min.</div>
+  <aside class="notes">Premier apport. La plupart des appels de texte sont petits et fréquents. Chacun était un appel Claude décompté de l'abonnement, le même quota dont ont besoin les documents et les projets. On branche donc une passerelle auto-hébergée, OmniRoute ou FreeLLMAPI, qui regroupe les offres gratuites de nombreux fournisseurs. Les appels rapides y vont en premier&nbsp;; les appels qui demandent du raisonnement restent sur Claude. La recherche ancrée reste sur Gemini, le seul à fournir les sources.</aside>
+</section>
+
+<!-- ════════════════ 8 — COMPTEUR ════════════════ -->
+<section class="slide" id="s8">
+  <div class="chrome"><span><b>JARVIS</b> · Apport Ydays ②</span><span>08 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Mesurer avant d'optimiser</p>
+    <h2>Une économie devient <em>un chiffre.</em></h2>
+  </div>
+  <div class="usage-left">
+    <ul class="list">
+      <li><strong>Chaque moteur</strong> déclare les tokens qu'il a consommés</li>
+      <li><strong>Par jour</strong>, gardé 14&nbsp;jours, affiché dans les réglages</li>
+      <li><strong>Écriture atomique</strong>&nbsp;: un plantage ne corrompt rien</li>
+      <li><strong>Ne lève jamais d'erreur</strong>&nbsp;: compter ne casse pas une réponse</li>
+    </ul>
+  </div>
+  <div class="json">
+    <div class="file">config/usage.json</div>
+<pre>{
+  <span class="k">"2026-10-21"</span>: {
+    <span class="k">"claude"</span>: {
+      <span class="s">"calls"</span>: …, <span class="s">"in"</span>: …,
+      <span class="s">"out"</span>: …, <span class="s">"cached"</span>: …
+    },
+    <span class="k">"claude-agent"</span>: { … },
+    <span class="k">"gateway"</span>:      { … },
+    <span class="k">"gemini"</span>:       { … }
+  }
+}</pre>
+  </div>
+  <div class="engines"><span class="tag o">Claude</span><span class="tag o">Claude tâches</span><span class="tag g">Passerelle</span><span class="tag">Gemini</span></div>
+  <aside class="notes">Deuxième apport. On ne peut pas dire qu'on économise des tokens sans les compter. Chaque moteur déclare désormais ce qu'il a consommé&nbsp;: Claude en appel simple, Claude en mode agent, la passerelle et Gemini. Le total du jour s'affiche dans le panneau de réglages, et l'historique de quatorze jours reste en local. Le compteur est conçu pour ne jamais casser une réponse&nbsp;: s'il échoue, il se tait.</aside>
+</section>
+
+<!-- ════════════════ 9 — PROJETS ════════════════ -->
+<section class="slide" id="s9">
+  <div class="chrome"><span><b>JARVIS</b> · Apport Ydays ③</span><span>09 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Projets logiciels</p>
+    <h2>De l'idée au code, <em>une étape à la fois.</em></h2>
+  </div>
+  <div class="head" style="top:336px;"><p class="quote"><span>«</span> Crée un projet&nbsp;: une appli de budget pour étudiants. <span>»</span></p></div>
+  <div class="pipes">
+    <div class="pipe">
+      <div class="lbl">Clone d'une appli existante</div>
+      <div class="steps">
+        <span class="step">recon</span><span class="sep"></span><span class="step h">architect</span><span class="sep"></span><span class="step">design</span><span class="sep"></span><span class="step h">build</span><span class="sep"></span><span class="step h">backend</span><span class="sep"></span><span class="step">test</span><span class="sep"></span><span class="step">diff</span><span class="sep"></span><span class="step">entrepreneur</span><span class="sep"></span><span class="step">brand</span><span class="sep"></span><span class="step">launch</span>
+      </div>
+    </div>
+    <div class="pipe">
+      <div class="lbl">Votre propre idée</div>
+      <div class="steps">
+        <span class="step spec">spec</span><span class="sep"></span><span class="step h">architect</span><span class="sep"></span><span class="step">design</span><span class="sep"></span><span class="step h">build</span><span class="sep"></span><span class="step h">backend</span><span class="sep"></span><span class="step">test</span><span class="sep"></span><span class="step">diff</span>
+      </div>
+    </div>
+    <div class="legend"><span><i style="border-color:var(--orange)"></i>Opus — étapes lourdes</span><span><i style="border-color:var(--line-2)"></i>Sonnet — le reste</span><span><i style="border-color:var(--green)"></i>Étape ajoutée par nous</span></div>
+  </div>
+  <div class="sober">
+    <div class="card"><h3>Une étape à la fois</h3><p>Vous décidez quand l'heure d'Opus suivante en vaut la peine.</p></div>
+    <div class="card"><h3>Session neuve</h3><p>On transmet quelques Ko de notes, pas tout l'historique.</p></div>
+    <div class="card"><h3>Le bon modèle</h3><p>Opus pour bâtir, Sonnet pour chercher, tester, noter.</p></div>
+    <div class="card"><h3>Skills locales</h3><p>Rangées dans le projet&nbsp;: les autres tâches ne les paient pas.</p></div>
+  </div>
+  <aside class="notes">Troisième apport&nbsp;: les projets. Le mode tâche classique oublie tout à la fin. Un projet, lui, grandit sur plusieurs jours&nbsp;: il a son dossier, son état et une méthode, les skills open source Replica. Pour un clone, dix étapes de la reconnaissance au lancement. Pour une idée originale, nous avons ajouté l'étape spec, qui transforme la description en cahier des charges que Replica sait lire. Et tout est pensé pour la sobriété&nbsp;: une étape par demande, une session neuve à chaque fois, Opus seulement là où il faut, Sonnet ailleurs.</aside>
+</section>
+
+<!-- ════════════════ 10 — SÉCURITÉ ════════════════ -->
+<section class="slide" id="s10">
+  <div class="chrome"><span><b>JARVIS</b> · Confiance</span><span>10 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Un assistant qui agit doit être sûr</p>
+    <h2>Il agit vite. <em>Rien d'irréversible</em> sans vous.</h2>
+  </div>
+  <div class="three">
+    <div class="card">
+      <svg class="ic" viewBox="0 0 64 64" fill="none" stroke="#ff7a1a" stroke-width="4"><path d="M32 6l22 8v16c0 14-10 24-22 28C20 54 10 44 10 30V14z"/><path d="M22 32l7 7 14-15"/></svg>
+      <h3>Une vraie confirmation</h3>
+      <p>Arrêt, redémarrage, Wi-Fi&nbsp;: une bannière s'affiche, l'action ne part que si <strong style="color:var(--text)">vous</strong> cliquez. Le modèle ne peut pas la valider lui-même.</p>
+    </div>
+    <div class="card">
+      <svg class="ic" viewBox="0 0 64 64" fill="none" stroke="#00d4ff" stroke-width="4"><path d="M18 22H40a14 14 0 010 28H22"/><path d="M26 12L14 22l12 10"/></svg>
+      <h3>Tout s'annule</h3>
+      <p>Fichiers déplacés, renommés, créés, écrits — et réglages modifiés. «&nbsp;Annule&nbsp;», dans n'importe quelle langue.</p>
+    </div>
+    <div class="card">
+      <svg class="ic" viewBox="0 0 64 64" fill="none" stroke="#00f08a" stroke-width="4"><rect x="12" y="28" width="40" height="28" rx="5"/><path d="M20 28v-8a12 12 0 0124 0v8"/></svg>
+      <h3>Vos données restent chez vous</h3>
+      <p>Pas de serveur, pas de télémétrie, pas de compte. Mémoire, clés et compteurs en local, exclus de git.</p>
+    </div>
+  </div>
+  <aside class="notes">Un assistant qui agit sur l'ordinateur doit inspirer confiance. Trois garde-fous. Les actions irréversibles attendent un clic humain, et ce jeton vient de l'interface, pas du modèle. Tout le reste est annulable&nbsp;: il suffit de dire «&nbsp;annule&nbsp;». Et les données restent sur la machine&nbsp;: pas de serveur, pas de télémétrie.</aside>
+</section>
+
+<!-- ════════════════ 11 — CHIFFRES ════════════════ -->
+<section class="slide" id="s11">
+  <div class="chrome"><span><b>JARVIS</b> · En chiffres</span><span>11 / 13</span></div>
+  <div class="head">
+    <p class="kicker">Mesuré, pas supposé</p>
+    <h2>Chaque optimisation <em>a son chiffre.</em></h2>
+  </div>
+  <div class="nums">
+    <div class="num y"><div class="v">11,2&nbsp;s</div><p>gagnées sur chaque appel après la panne d'un modèle</p></div>
+    <div class="num o"><div class="v">≈&nbsp;1&nbsp;000</div><p>tokens de moins à chaque session&nbsp;: 16&nbsp;827 → 12&nbsp;907 caractères d'outils</p></div>
+    <div class="num"><div class="v">41&nbsp;→&nbsp;8</div><p>périphériques audio&nbsp;: la liste que l'OS montre vraiment</p></div>
+    <div class="num"><div class="v">211&nbsp;→&nbsp;39&nbsp;<small>ms</small></div><p>pour charger les plugins au démarrage</p></div>
+    <div class="num o"><div class="v">971</div><p>caractères de prompt pour une mémoire de 62&nbsp;faits</p></div>
+    <div class="num"><div class="v">≈&nbsp;28&nbsp;700</div><p>lignes de Python, sur Windows, macOS et Linux</p></div>
+  </div>
+  <aside class="notes">Quelques chiffres, tous mesurés sur le projet. 11,2&nbsp;secondes gagnées par appel grâce à la mise au repos des modèles en panne. Environ mille tokens économisés à chaque session en réduisant la liste des outils déclarés au modèle. Une liste audio ramenée de 41 à 8 entrées. Le chargement des plugins passé de 211 à 39 millisecondes. Et une mémoire de 62&nbsp;faits qui ne coûte que 971 caractères de prompt.</aside>
+</section>
+
+<!-- ════════════════ 12 — DÉMO ════════════════ -->
+<section class="slide" id="s12">
+  <div class="chrome"><span><b>JARVIS</b> · Démo</span><span>12 / 13</span></div>
+  <div class="head">
+    <p class="kicker">En direct</p>
+    <h2>Il suffit de <em>lui parler.</em></h2>
+  </div>
+  <div class="demo">
+    <div class="cmd"><div class="say">«&nbsp;Hey Jarvis, mets la bande-annonce de Dune.&nbsp;»</div><div class="does">La vidéo prend la place de l'avatar, son coupé.</div></div>
+    <div class="cmd"><div class="say">«&nbsp;Range mon bureau.&nbsp;» … «&nbsp;Annule.&nbsp;»</div><div class="does">Chaque fichier retourne à sa place.</div></div>
+    <div class="cmd"><div class="say">«&nbsp;Qu'est-ce que tu vois sur mon écran&nbsp;?&nbsp;»</div><div class="does">Capture, lecture, réponse à voix haute.</div></div>
+    <div class="cmd"><div class="say">«&nbsp;Crée un projet&nbsp;: une appli de budget.&nbsp;»</div><div class="does">Un dossier, un brief, la première étape.</div></div>
+    <div class="cmd"><div class="say">«&nbsp;Éteins l'ordinateur.&nbsp;»</div><div class="does">Une bannière&nbsp;: rien ne part sans votre clic.</div></div>
+  </div>
+  <aside class="notes">Place à la démonstration. Nous allons enchaîner quelques commandes vocales&nbsp;: lancer une vidéo sur le HUD, ranger le bureau puis annuler, lire l'écran, créer un projet, et montrer que l'arrêt de l'ordinateur attend une confirmation humaine.</aside>
+</section>
+
+<!-- ════════════════ 13 — FIN ════════════════ -->
+<section class="slide" id="s13">
+  <div class="chrome"><span><b>JARVIS</b> · Projet Ydays</span><span>13 / 13</span></div>
+  <svg class="end-logo" viewBox="0 0 300 300" aria-hidden="true">
+    <circle cx="150" cy="150" r="138" fill="none" stroke="#00d4ff" stroke-width="7"/>
+    <circle cx="150" cy="150" r="104" fill="none" stroke="#1a5c7a" stroke-width="3"/>
+    <g stroke="#00d4ff" stroke-width="4" stroke-linecap="round" opacity="0.85">
+      <line x1="150" y1="62" x2="150" y2="104"/><line x1="150" y1="196" x2="150" y2="238"/>
+      <line x1="62" y1="150" x2="104" y2="150"/><line x1="196" y1="150" x2="238" y2="150"/>
+    </g>
+    <circle cx="150" cy="150" r="34" fill="#02080d" stroke="#00d4ff" stroke-width="7"/>
+    <circle cx="150" cy="150" r="19" fill="#cdeeff"/>
+  </svg>
+  <div class="end">
+    <h2>Merci. <em>Des questions&nbsp;?</em></h2>
+    <p class="lead">Jarvis — l'assistant qui entend, voit, parle et agit.</p>
+  </div>
+  <div class="road">
+    <div class="lbl">Et ensuite</div>
+    <div class="row"><span class="step">Interrompre à la voix</span><span class="step">Historique des conversations</span><span class="step">Contrôle via Telegram</span><span class="step">Accès complet aux fichiers</span><span class="step">Obsidian</span></div>
+  </div>
+  <div class="credits">Base&nbsp;: Mark LV par FatihMakes (CC BY-NC 4.0) · Méthode projets&nbsp;: Replica (MIT)</div>
+  <aside class="notes">Merci de votre attention. Pour la suite, la feuille de route prévoit l'interruption à la voix, l'historique des conversations, le contrôle via Telegram, un accès complet aux fichiers et une intégration Obsidian. Nous sommes prêts pour vos questions.</aside>
+</section>
+
+
+<style id="jx-viewer">
+html.jx-view, html.jx-view body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0b0b; }
+html.jx-view section.slide { position: absolute !important; left: 50%; top: 50%; margin: 0 !important;
+  width: 1920px; height: 1080px; transform: translate(-50%, -50%) scale(var(--jx-s, 1));
+  visibility: hidden; }
+html.jx-view section.slide.jx-on { visibility: visible; }
+html.jx-view aside.notes { display: none !important; }
+#jx-count { position: fixed; right: 14px; bottom: 10px; font: 12px/1 system-ui, sans-serif;
+  color: rgba(255,255,255,.55); z-index: 99; user-select: none; }
+@media print { html.jx-view section.slide { position: relative !important; left: 0; top: 0;
+  transform: none; visibility: visible; page-break-after: always; } #jx-count { display: none; } }
+</style>
+<script id="jx-viewer-js">
+(() => {
+  const root = document.documentElement; root.classList.add('jx-view');
+  const slides = [...document.querySelectorAll('section.slide')];
+  const count = document.createElement('div'); count.id = 'jx-count'; document.body.appendChild(count);
+  let i = Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1);
+  const fit = () => root.style.setProperty('--jx-s', Math.min(innerWidth / 1920, innerHeight / 1080));
+  const show = n => {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('jx-on', k === i));
+    count.textContent = (i + 1) + ' / ' + slides.length;
+    history.replaceState(null, '', '#' + (i + 1));
+  };
+  addEventListener('resize', fit);
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) show(i + 1);
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) show(i - 1);
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key === 'f' || e.key === 'F') {
+      document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen();
+    } else return;
+    e.preventDefault();
+  });
+  addEventListener('click', e => show(e.clientX < innerWidth / 3 ? i - 1 : i + 1));
+  fit(); show(i);
+})();
+</script>
+</body>
+</html>

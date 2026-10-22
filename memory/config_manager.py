@@ -384,3 +384,22 @@ def get_claude_token() -> str:
 
 def save_claude_token(token: str) -> None:
     _patch_config(claude_oauth_token=(token or "").strip())
+
+
+# ── Free LLM gateway ─────────────────────────────────────────────────────────
+# OmniRoute or FreeLLMAPI, self-hosted (core/gateway.py). The tiers listed try
+# it before Claude; an empty URL switches it off. The finer settings (models,
+# compression, vision, headers) are read from api_keys.json by core/gateway.py
+# and have no UI on purpose: the defaults are right for both gateways.
+
+def get_gateway_config() -> dict:
+    cfg = load_api_keys()
+    tiers = cfg.get("gateway_tiers")
+    return {"url": str(cfg.get("gateway_url") or "").strip(),
+            "key": str(cfg.get("gateway_key") or "").strip(),
+            "tiers": [str(t) for t in tiers] if isinstance(tiers, list) else ["fast"]}
+
+
+def save_gateway_config(url: str, key: str, tiers) -> None:
+    _patch_config(gateway_url=(url or "").strip(), gateway_key=(key or "").strip(),
+                  gateway_tiers=[t for t in ("fast", "smart") if t in set(tiers or ())])
