@@ -20,3 +20,28 @@ Used by `actions/project.py`: each project gets its own copy in
 `<project>/.claude/skills/`. The bundled Python tools are standard-library only
 and make no network calls. To update, copy the `replica-*` folders from a newer
 commit over these and change the commit above.
+
+## scrum/
+
+Ours. Seven skills, one per step of a Scrum project file, each writing JSON in
+the workspace's `scrum/` and reading what the previous ones wrote:
+
+| Skill | Writes |
+|---|---|
+| `scrum-cadrage` | `bete-a-cornes.json`, `pieuvre.json`, `swot.json`, the vision in `meta.json` |
+| `scrum-parties-prenantes` | `parties-prenantes.json` (power/interest), `raci.json` |
+| `scrum-discovery` | `discovery.json` (personas, hypotheses, experiments) |
+| `scrum-backlog` | `product-backlog.json` (epics, stories, DoR, DoD) |
+| `scrum-sprint` | `sprints.json` (goals, tasks, burndown) |
+| `scrum-risques` | `risques.json` |
+| `scrum-planning` | `planning.json` (Gantt, milestones, ceremonies) |
+
+`render.py` draws all of it — standard library only, no network — into
+self-contained HTML with inline SVG, and `--check` validates the data (one A
+per RACI row, an FP links two elements, story points on the Fibonacci scale,
+dates…). Each shape is documented in the SKILL.md that writes it.
+
+Used by `actions/scrum.py`: each workspace gets the skills in
+`<workspace>/.claude/skills/` and a copy of the renderer in
+`.claude/scrum-kit/` for the agents' own checks. The assistant always draws
+with the copy here, which no agent can edit.

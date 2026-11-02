@@ -357,6 +357,32 @@ Built to spend as little as it can:
 
 ---
 
+## 🧭 Scrum — project management, drawn
+
+*"Crée un espace Scrum pour notre projet Ydays : un assistant vocal pour étudiants"* — *"Fais-moi la matrice RACI"* — *"Montre le SWOT"* — *"Exporte le dossier en PDF"*
+
+The other half of a project: the deliverables a project-management course or a client asks for. Each workspace is a folder in `Documents/JARVIS/scrum/<name>/`, built step by step by the skills in `skill_packs/scrum/`:
+
+| Step | Deliverables |
+|---|---|
+| `cadrage` | Bête à cornes (APTE) · diagramme pieuvre (FP / FC with criteria, level, flexibility) · SWOT with TOWS strategies · product vision |
+| `parties-prenantes` | Internal and external stakeholders on a power / interest grid · RACI matrix |
+| `discovery` | Personas · discovery backlog (hypotheses, questions, experiments, spikes) |
+| `backlog` | Product goal · epics · user stories with acceptance criteria, points, MoSCoW · story map · DoR / DoD |
+| `sprint` | Sprint goal · capacity vs commitment · sprint board · burndown |
+| `risques` | Risk register · 5×5 probability × impact heat map |
+| `planning` | Gantt with phases, sprints and milestones · Scrum ceremonies |
+
+**The agent writes data, not drawings.** Each step is a fresh Claude agent (Sonnet by default) that writes a few kilobytes of JSON in `scrum/`. `render.py` draws every deliverable locally as HTML and SVG, the same way every time, and validates the data while it is at it (exactly one *A* per RACI row, an FP links two elements, points on the Fibonacci scale, a sprint within its capacity). So:
+
+- **show** puts a deliverable on the HUD, **open** opens the dashboard in the browser and **export** prints the whole dossier to an A4 landscape PDF, all for **zero tokens**;
+- **task** changes anything in words (*"ajoute un risque sur le planning"*, *"US-04 est terminée"*); only the JSON it touches is rewritten;
+- **run** redoes one step or a single deliverable (*"refais juste le SWOT"*), **continue** goes on with the next steps (`steps` up to 7 for the whole pipeline).
+
+Sources can be handed in at creation (`sources`: a brief, a cahier des charges in PDF, DOCX or text). Override the model with `scrum_model`, or per step with `scrum_models`, in `config/api_keys.json`. Like projects, Scrum needs Claude and is hidden in *Gemini only* mode.
+
+---
+
 ## 📋 Requirements
 
 | Requirement | Details |
@@ -402,9 +428,11 @@ Mark LV/
 │   ├── weather_report.py     # Live weather data
 │   ├── video_player.py       # Plays video on the HUD, where the avatar normally is
 │   ├── project.py            # Software projects, one folder each, built step by step with Replica
+│   ├── scrum.py              # Scrum deliverables, one workspace each, drawn locally
 │   └── desktop.py            # Desktop and taskbar control
 ├── skill_packs/
-│   └── replica/              # Replica skills (MIT), copied into each project — not loaded globally
+│   ├── replica/              # Replica skills (MIT), copied into each project — not loaded globally
+│   └── scrum/                # Scrum skills + render.py, copied into each workspace
 ├── memory/
 │   ├── memory_manager.py     # Load/save long_term.json — sessions, monitors, identity
 │   ├── config_manager.py     # api_keys.json access — key, OS, name, voice, colour, toggles
