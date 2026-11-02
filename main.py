@@ -39,6 +39,13 @@ from core import x11_compat as _x11_compat
 
 _x11_compat.apply()
 
+# ── Snap runtime leaking into our env must be dropped before Qt starts ───────
+# See core/snap_compat.py: launched from the snap VS Code terminal, GLib aborts
+# on a missing 'antialiasing' gsettings key as soon as the window opens.
+from core import snap_compat as _snap_compat
+
+_snap_compat.apply()
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio

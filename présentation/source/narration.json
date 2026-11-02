@@ -1,0 +1,60 @@
+{
+  "voice": "Charon",
+  "lines": [
+    {
+      "at": 0.9,
+      "until": 4.9,
+      "text": "Et si votre ordinateur vous écoutait vraiment ?"
+    },
+    {
+      "at": 5.4,
+      "until": 9.5,
+      "text": "Voici Jarvis. L'assistant vocal qui pilote l'ordinateur."
+    },
+    {
+      "at": 9.6,
+      "until": 10.75,
+      "text": "Il entend."
+    },
+    {
+      "at": 10.8,
+      "until": 11.95,
+      "text": "Il voit."
+    },
+    {
+      "at": 12.0,
+      "until": 13.15,
+      "text": "Il parle."
+    },
+    {
+      "at": 13.2,
+      "until": 15.4,
+      "text": "Et surtout… il agit."
+    },
+    {
+      "at": 16.0,
+      "until": 23.3,
+      "text": "Gemini Live écoute et répond en temps réel. Quand il faut réfléchir, Claude prend le relais."
+    },
+    {
+      "at": 23.8,
+      "until": 28.7,
+      "text": "Applis, fichiers, web, vidéo : il pilote toute la machine."
+    },
+    {
+      "at": 29.3,
+      "until": 34.8,
+      "text": "Tout est mesuré : onze secondes par appel, mille tokens par session."
+    },
+    {
+      "at": 35.4,
+      "until": 43.0,
+      "text": "Notre apport : une passerelle gratuite, un compteur de tokens, et des projets menés de l'idée au code."
+    },
+    {
+      "at": 45.0,
+      "until": 48.9,
+      "text": "Jarvis. Il ne répond pas. Il agit."
+    }
+  ]
+}
