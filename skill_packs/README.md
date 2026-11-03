@@ -23,7 +23,7 @@ commit over these and change the commit above.
 
 ## scrum/
 
-Ours. Seven skills, one per step of a Scrum project file, each writing JSON in
+Ours. Eight skills, one per step of a Scrum project file, each writing JSON in
 the workspace's `scrum/` and reading what the previous ones wrote:
 
 | Skill | Writes |
@@ -31,9 +31,10 @@ the workspace's `scrum/` and reading what the previous ones wrote:
 | `scrum-cadrage` | `bete-a-cornes.json`, `pieuvre.json`, `swot.json`, the vision in `meta.json` |
 | `scrum-parties-prenantes` | `parties-prenantes.json` (power/interest), `raci.json` |
 | `scrum-discovery` | `discovery.json` (personas, hypotheses, experiments) |
-| `scrum-backlog` | `product-backlog.json` (epics, stories, DoR, DoD) |
-| `scrum-sprint` | `sprints.json` (goals, tasks, burndown) |
-| `scrum-risques` | `risques.json` |
+| `scrum-cahier-des-charges` | `cahier-des-charges.json` (the specification, NF EN 16271; assembled with the files above into one document, PDF and Word) |
+| `scrum-backlog` | `product-backlog.json` (product goal, epics, stories, bugs, technical items, spikes, DoR, DoD; also drawn as the value / effort matrix and the Scrum framework page) |
+| `scrum-sprint` | `sprints.json` (goals, tasks, burndown, review, retrospective; velocity and burn-up are computed) |
+| `scrum-risques` | `risques.json` (drawn three ways: register, risk matrix before / after treatment, heat map) |
 | `scrum-planning` | `planning.json` (Gantt, milestones, ceremonies) |
 
 `render.py` draws all of it — standard library only, no network — into
@@ -43,5 +44,6 @@ dates…). Each shape is documented in the SKILL.md that writes it.
 
 Used by `actions/scrum.py`: each workspace gets the skills in
 `<workspace>/.claude/skills/` and a copy of the renderer in
-`.claude/scrum-kit/` for the agents' own checks. The assistant always draws
-with the copy here, which no agent can edit.
+`.claude/scrum-kit/` for the agents' own checks, both refreshed from here
+before every run so older workspaces follow changes. The assistant always
+draws with the copy here, which no agent can edit.

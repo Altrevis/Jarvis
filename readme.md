@@ -359,7 +359,7 @@ Built to spend as little as it can:
 
 ## 🧭 Scrum — project management, drawn
 
-*"Crée un espace Scrum pour notre projet Ydays : un assistant vocal pour étudiants"* — *"Fais-moi la matrice RACI"* — *"Montre le SWOT"* — *"Exporte le dossier en PDF"*
+*"Crée un espace Scrum pour notre projet Ydays : un assistant vocal pour étudiants"* — *"Fais-moi la matrice RACI"* — *"Montre le SWOT"* — *"Montre la matrice de chaleur"* — *"Fais-moi le cahier des charges"* — *"Exporte le cahier des charges en Word"* — *"Exporte le dossier en PDF"*
 
 The other half of a project: the deliverables a project-management course or a client asks for. Each workspace is a folder in `Documents/JARVIS/scrum/<name>/`, built step by step by the skills in `skill_packs/scrum/`:
 
@@ -368,16 +368,21 @@ The other half of a project: the deliverables a project-management course or a c
 | `cadrage` | Bête à cornes (APTE) · diagramme pieuvre (FP / FC with criteria, level, flexibility) · SWOT with TOWS strategies · product vision |
 | `parties-prenantes` | Internal and external stakeholders on a power / interest grid · RACI matrix |
 | `discovery` | Personas · discovery backlog (hypotheses, questions, experiments, spikes) |
-| `backlog` | Product goal · epics · user stories with acceptance criteria, points, MoSCoW · story map · DoR / DoD |
-| `sprint` | Sprint goal · capacity vs commitment · sprint board · burndown |
-| `risques` | Risk register · 5×5 probability × impact heat map |
+| `cahier-des-charges` | Functional specification after NF EN 16271: context, measurable objectives, scope and exclusions, users, life-cycle situations, functional requirements tied to the pieuvre's functions, non-functional requirements (criterion · level · flexibility F0–F3), technical environment, organisation, budget, deliverables, acceptance, support, glossary, traceability matrix — as a numbered document, in PDF and Word |
+| `backlog` | Product goal · epics · user stories with acceptance criteria, points, MoSCoW, plus bugs, technical items and time-boxed spikes · story map · backlog health (estimates, ready points vs velocity, 20/30/50 shape) · value / effort matrix · DoR / DoD · the **Scrum framework** page: the three artefacts and their commitments, the Scrum Team, the events checked against the Scrum Guide 2020 timeboxes |
+| `sprint` | Sprint goal (why), items (what), tasks of a day or less (how) · capacity vs commitment · sprint board · burndown · Increment · Sprint Review and retrospective · velocity · product burn-up |
+| `risques` | Risk register · risk matrix (probability × impact) before and after treatment · heat map with the exposure by category |
 | `planning` | Gantt with phases, sprints and milestones · Scrum ceremonies |
 
 **The agent writes data, not drawings.** Each step is a fresh Claude agent (Sonnet by default) that writes a few kilobytes of JSON in `scrum/`. `render.py` draws every deliverable locally as HTML and SVG, the same way every time, and validates the data while it is at it (exactly one *A* per RACI row, an FP links two elements, points on the Fibonacci scale, a sprint within its capacity). So:
 
-- **show** puts a deliverable on the HUD, **open** opens the dashboard in the browser and **export** prints the whole dossier to an A4 landscape PDF, all for **zero tokens**;
+- **show** puts a deliverable on the HUD, **open** opens the dashboard in the browser and **export** prints the whole dossier to an A4 landscape PDF, all for **zero tokens**; *"exporte le cahier des charges"* gives the specification alone, in A4 portrait PDF and in an editable Word file;
 - **task** changes anything in words (*"ajoute un risque sur le planning"*, *"US-04 est terminée"*); only the JSON it touches is rewritten;
-- **run** redoes one step or a single deliverable (*"refais juste le SWOT"*), **continue** goes on with the next steps (`steps` up to 7 for the whole pipeline).
+- **run** redoes one step or a single deliverable (*"refais juste le SWOT"*), **continue** goes on with the next steps (`steps` up to 8 for the whole pipeline).
+
+**The cahier des charges is assembled, not copied.** Its own file holds what no other deliverable says; the need statement, the interaction diagram and its functions, the stakeholders, the RACI, the risks and the Gantt are drawn from their own files, so the document cannot contradict the diagrams. Every requirement points to the pieuvre function it serves and every user story to the requirement it implements; the checker flags a function nobody serves, a must-have no story implements, a requirement with no acceptance criteria, a non-functional requirement without a level, vague words (*rapide, intuitif, etc.*) and missing exclusions. Asking for it brings the whole dossier along: every step not done yet runs with it, in order — on a new project, the eight steps.
+
+**Every step is checked by the assistant, not by the agent.** An agent runs unattended with a short Bash allowlist and some commands it writes are refused (a shell loop over the JSON files is). So after each step the assistant runs `render.py --check` itself, hands the exact errors to a short correction run (twice at most) and only marks the step done when the check passes. A step left partial does not stop the chain; the final report says which ones need another look.
 
 Sources can be handed in at creation (`sources`: a brief, a cahier des charges in PDF, DOCX or text). Override the model with `scrum_model`, or per step with `scrum_models`, in `config/api_keys.json`. Like projects, Scrum needs Claude and is hidden in *Gemini only* mode.
 

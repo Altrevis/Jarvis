@@ -93,7 +93,7 @@ ddgs>=9,<10                  # web_search — the maintained successor to
                              # falls back to the old name automatically
 pdfplumber                   # file_processor — PDF text and tables
 PyPDF2                       # file_processor — PDF fallback reader
-python-docx                  # file_processor — .docx reading
+python-docx                  # file_processor — .docx reading; scrum — the cahier des charges in Word
 matplotlib>=3.7,<4            # generate_chart — charts rendered locally, offline
 nvidia-ml-py                 # system_monitor + the HUD's GPU meter (NVIDIA) — provides `import pynvml`;
                              # the old "pynvml" package is now only a deprecated redirector to it

@@ -14,7 +14,10 @@ description: >-
 One deliverable: `scrum/planning.json`.
 
 Read `CLAUDE.md` (deadlines, start date, availability) and `scrum/sprints.json`
-if it exists. **Do not copy the sprints into `items`**: the renderer adds every
+if it exists, and the `milestones` and deliverable dates of
+`scrum/cahier-des-charges.json` if it exists — they were promised to the
+client: keep them, or say in `scrum/decisions.md` why they move. **Do not
+copy the sprints into `items`**: the renderer adds every
 sprint of sprints.json to the Gantt by itself, in a "Sprints" group. Set
 `"include_sprints": false` only if you really want them hidden.
 
@@ -44,7 +47,10 @@ référent or client, deadlines, the defence. Each: `label` and `date`.
 
 ## Ceremonies
 
-The Scrum events, fitted to this team's rhythm:
+The Scrum events, fitted to this team's rhythm. Give each a `kind`
+(`planning`, `daily`, `review`, `retrospective`, `refinement`): the
+renderer checks durations against the Scrum Guide timeboxes for the sprint
+length and shows them on the Scrum framework page.
 
 | name | when | duration (2-week sprint) |
 |---|---|---|
@@ -54,9 +60,22 @@ The Scrum events, fitted to this team's rhythm:
 | Sprint retrospective | after the review | ≤ 1 h 30 |
 | Backlog refinement | mid-sprint (not an official event, but needed) | ≤ 10% of capacity |
 
-Scale durations with sprint length (they are maxima for a 1-month sprint
-halved for 2 weeks). For a part-time student team, a daily may be 3 times a
-week: say so rather than pretend.
+Scale durations with sprint length (they are maxima for a 1-month sprint —
+8 h, 4 h, 3 h — halved for 2 weeks). What each one is for (Scrum Guide 2020):
+
+- **Sprint planning** — the Sprint Goal (why), the items (what), the plan
+  (how).
+- **Daily scrum** — for the Developers: progress towards the Sprint Goal and
+  the plan for the next day. The three questions are gone since 2020; any
+  format that serves the goal will do.
+- **Sprint review** — a working session with the stakeholders on the
+  Increment, which adapts the product backlog; not a slideshow.
+- **Sprint retrospective** — how to improve quality and the way of working;
+  ends with a few owned actions.
+- **Backlog refinement** — an ongoing activity, not an official event.
+
+For a part-time student team, a daily may be 3 times a week: say so rather
+than pretend.
 
 ```json
 {
@@ -66,8 +85,8 @@ week: say so rather than pretend.
   ],
   "milestones": [{"label": "Soutenance", "date": "2026-12-17"}],
   "ceremonies": [
-    {"name": "Daily scrum", "when": "Chaque jour, 9 h 30", "duration": "15 min",
-     "who": "Développeurs, SM", "purpose": "Synchroniser l'équipe sur l'objectif du sprint"}
+    {"name": "Daily scrum", "kind": "daily", "when": "Chaque jour, 9 h 30", "duration": "15 min",
+     "who": "Developers", "purpose": "Inspecter la progression vers l'objectif du sprint, planifier la journée"}
   ]
 }
 ```

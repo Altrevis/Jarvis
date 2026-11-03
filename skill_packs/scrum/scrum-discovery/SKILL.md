@@ -39,6 +39,13 @@ Each item has a `type`:
 - `spike` — a time-boxed technical investigation ("Peut-on dessiner un Gantt
   sans librairie ?").
 
+For `research` and `experiment` items, say how in `method`: entretiens,
+observation, questionnaire, atelier, analyse documentaire, benchmark,
+prototype, test utilisateur, A/B test. Needs are gathered all along the
+project, not once: pick the technique that answers the question cheapest —
+watch users for friction, interview for the why, survey for numbers, a
+prototype to validate a requirement before building it.
+
 And a `status`: `todo`, `doing`, `validated`, `invalidated`. A new project
 starts mostly in `todo`; mark something validated or invalidated only when the
 brief or sources actually settle it, and write the evidence in `outcome`.
@@ -57,7 +64,7 @@ backlog exists.
   ],
   "items": [
     {"id": "D1", "type": "hypothesis", "title": "Les étudiants passent plus de 3 h par livrable",
-     "detail": "Mesurer sur 10 équipes", "status": "todo", "outcome": "", "leads_to": []},
+     "detail": "Mesurer sur 10 équipes", "method": "questionnaire", "status": "todo", "outcome": "", "leads_to": []},
     {"id": "D2", "type": "spike", "title": "Dessiner un Gantt en SVG sans librairie",
      "detail": "Time-box : 1 jour", "status": "todo"}
   ]

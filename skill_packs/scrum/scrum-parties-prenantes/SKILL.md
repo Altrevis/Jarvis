@@ -19,7 +19,8 @@ Two deliverables:
 
 Read `CLAUDE.md` (the team, if given) and `scrum/bete-a-cornes.json` /
 `scrum/pieuvre.json` if they exist (the users and external systems are
-there). Write only JSON. If the task asks for one deliverable, write that file
+there), and `scrum/cahier-des-charges.json` (its users, client, provider and
+roles must match yours). Write only JSON. If the task asks for one deliverable, write that file
 only.
 
 ## 1. Stakeholders
@@ -73,8 +74,11 @@ stakeholders; group people who play the same role ("Équipe de dev (3)").
 
 ## 2. RACI
 
-**Roles** are columns: the Scrum roles plus the stakeholders who take part in
-activities (référent, client, jury). **Activities** are rows, grouped by
+**Roles** are columns: the three Scrum accountabilities — Product Owner (one
+person, not a committee), Scrum Master, Developers (the Scrum Guide 2020 word;
+the whole Scrum Team is ten people or fewer) — plus the stakeholders who take
+part in activities (référent, client, jury). Put the real names in `name`:
+the Scrum framework page shows who holds each accountability. **Activities** are rows, grouped by
 `phase` (Cadrage, Backlog, Sprint, Livraison… — whatever fits the project),
 8 to 20 rows.
 

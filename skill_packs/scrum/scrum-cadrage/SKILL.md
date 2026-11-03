@@ -97,7 +97,9 @@ negotiable).
 ```
 
 Element ids are short, lowercase, no spaces; labels are what is drawn.
-Number FP1, FP2… then FC1, FC2…
+Number FP1, FP2… then FC1, FC2… If `scrum/cahier-des-charges.json` exists,
+its requirements point to these ids: keep every existing id and its meaning,
+add new functions with new numbers.
 
 ## 3. SWOT
 
