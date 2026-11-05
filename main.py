@@ -189,7 +189,7 @@ _TASK_LABELS = {
     "close_display": "DISPLAY", "ask_claude": "CLAUDE",
     "manage_skills": "SKILLS", "create_document": "DOCUMENT",
     "create_motion_video": "MOTION DESIGN", "project": "PROJECT",
-    "scrum": "SCRUM",
+    "scrum": "SCRUM", "agents": "AGENTS",
 }
 # Instant and invisible by design: flashing them on the bar would only say
 # "something happened" about nothing the user asked for.
@@ -199,7 +199,7 @@ _TASK_DETAIL_KEYS = ("query", "name", "title", "prompt", "app_name", "request",
                      "description", "items", "text")
 _TASK_ACTION_TOOLS = {"file_controller", "computer_settings", "browser_control",
                       "computer_control", "video_player", "code_helper",
-                      "manage_skills", "project", "scrum"}
+                      "manage_skills", "project", "scrum", "agents"}
 _FAIL_RE = re.compile(r"(?is)^\s*(tool '.*?' failed|could not|unknown tool|"
                       r"error|[^.\n]{0,40}\bfailed\b)")
 
@@ -1091,16 +1091,16 @@ class JarvisLive:
                       + self._action_registry.get_tool_declarations()
                       + self._plugin_registry.get_tool_declarations())
         # "Gemini only" (or no Claude Code on this machine) takes ask_claude,
-        # project and scrum out of the session altogether, so the model can
-        # neither call Claude nor read its own tool list as proof that Claude
-        # is its brain.
+        # project, scrum and agents out of the session altogether, so the model
+        # can neither call Claude nor read its own tool list as proof that
+        # Claude is its brain.
         from core import claude as _claude
         _claude_on = _claude.engine() == "claude" and _claude.binary() is not None
         _decl_name = lambda d: (d.get("name") if isinstance(d, dict)
                                 else getattr(d, "name", ""))
         if not _claude_on:
             _all_decls = [d for d in _all_decls
-                          if _decl_name(d) not in ("ask_claude", "project", "scrum")]
+                          if _decl_name(d) not in ("ask_claude", "project", "scrum", "agents")]
         _names = {_decl_name(d) for d in _all_decls}
         _engines, _reasoning = _describe_engines(_claude_on)
         sys_prompt = _render_prompt(sys_prompt, {

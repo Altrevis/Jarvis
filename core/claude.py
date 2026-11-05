@@ -85,9 +85,11 @@ AGENT_BASH = ("python3 *", "python *", "pip install *", "pip3 install *",
 
 # Concurrency. A one-shot is a few seconds of one process; an agent can run for
 # minutes and spawn its own. Both are capped so a burst of requests cannot fill
-# the machine with node processes.
+# the machine with node processes. The agent cap is "claude_agent_slots" in
+# config/api_keys.json (read at startup): three by default, so an agent team
+# working two at a time (core/orchestrator.py) still leaves one for the rest.
 _ONE_SHOT_SLOTS = threading.BoundedSemaphore(4)
-_AGENT_SLOTS = threading.BoundedSemaphore(2)
+_DEFAULT_AGENT_SLOTS = 3
 _SLOT_WAIT = 5.0
 
 # Variables a parent Claude Code session sets for ITS children. When MARK LV is
@@ -110,6 +112,10 @@ _IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 class ClaudeError(RuntimeError):
     pass
+
+
+class ClaudeCancelled(ClaudeError):
+    """The run was stopped on purpose (its `cancel` event was set)."""
 
 
 @dataclass
@@ -139,6 +145,33 @@ def _config() -> dict:
         return json.loads(_KEY_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _agent_slot_count() -> int:
+    try:
+        n = int(_config().get("claude_agent_slots") or _DEFAULT_AGENT_SLOTS)
+    except (TypeError, ValueError):
+        n = _DEFAULT_AGENT_SLOTS
+    return max(1, min(6, n))
+
+
+AGENT_SLOTS = _agent_slot_count()
+_AGENT_SLOTS = threading.BoundedSemaphore(AGENT_SLOTS)
+
+
+def _acquire(sem: threading.BoundedSemaphore, wait: float,
+             cancel: threading.Event | None = None) -> bool:
+    """Take a slot, waiting up to `wait` seconds; give up early when `cancel`
+    is set, so a stopped job does not sit in the queue."""
+    deadline = time.monotonic() + max(0.0, wait)
+    while True:
+        if cancel is not None and cancel.is_set():
+            return False
+        left = deadline - time.monotonic()
+        if sem.acquire(timeout=max(0.0, min(left, 1.0))):
+            return True
+        if left <= 0:
+            return False
 
 
 def engine() -> str:
@@ -349,19 +382,25 @@ def _kill(proc: subprocess.Popen) -> None:
 def run(prompt: str, *, model: str, system: str = "", append_system: str = "",
         images: list[tuple[bytes, str]] | None = None,
         tools: tuple[str, ...] | list[str] = (), allowed: tuple[str, ...] | list[str] = (),
+        disallowed: tuple[str, ...] | list[str] = (),
         cwd: Path | None = None, add_dirs: list[str] | None = None,
         setting_sources: str = "", skills: bool = False,
         timeout: float = 60.0, on_event: Callable[[dict], None] | None = None,
-        usage_tag: str = "claude") -> Result:
+        usage_tag: str = "claude",
+        cancel: threading.Event | None = None) -> Result:
     """One `claude -p` run, start to finish. Raises ClaudeError on any failure.
 
     `system` replaces Claude Code's own system prompt (one-shot calls);
     `append_system` adds to it (agent runs, which want the agentic prompt).
     `on_event` sees every stream-json event, for progress reporting.
-    `usage_tag` is the engine name its tokens are counted under (core/usage)."""
+    `usage_tag` is the engine name its tokens are counted under (core/usage).
+    `cancel`, when set, kills the run (and what it started) within a second
+    and raises ClaudeCancelled. `disallowed` rules win over `allowed` ones."""
     exe = binary()
     if not exe:
         raise ClaudeError("Claude Code is not installed (no `claude` command found)")
+    if cancel is not None and cancel.is_set():
+        raise ClaudeCancelled("cancelled before it started")
 
     content: list[dict] = []
     for data, mime in images or ():
@@ -387,6 +426,8 @@ def run(prompt: str, *, model: str, system: str = "", append_system: str = "",
             "--tools", ",".join(tools)]
     if allowed:
         args += ["--allowedTools", ",".join(allowed), "--permission-mode", "dontAsk"]
+    if disallowed:
+        args += ["--disallowedTools", ",".join(disallowed)]
     if not skills:
         args.append("--disable-slash-commands")
     # Prompts travel through files, not argv: a multi-line system prompt does
@@ -441,6 +482,9 @@ def run(prompt: str, *, model: str, system: str = "", append_system: str = "",
             pass
         deadline = t0 + timeout
         while True:
+            if cancel is not None and cancel.is_set():
+                _kill(proc)
+                raise ClaudeCancelled("cancelled")
             left = deadline - time.monotonic()
             if left <= 0:
                 _kill(proc)
@@ -495,17 +539,16 @@ def run(prompt: str, *, model: str, system: str = "", append_system: str = "",
                   tokens_in=tin, tokens_out=tout, tokens_cached=tcached)
 
 
-def ask(prompt: str, tier: str = FAST, system: str = "",
-        images: list[tuple[bytes, str]] | None = None,
-        web: bool = False, timeout: float = 60.0) -> str:
-    """A one-shot answer: no tools (web search only when asked), no skills, no
-    project context. Raises ClaudeError; core/gemini.py turns that into a
-    fallback to its own ladder."""
+def ask_full(prompt: str, tier: str = FAST, system: str = "",
+             images: list[tuple[bytes, str]] | None = None,
+             web: bool = False, timeout: float = 60.0, model: str = "") -> Result:
+    """`ask`, returning the whole Result (tokens, duration) rather than the
+    text alone. `model` overrides the tier's model."""
     if not _ONE_SHOT_SLOTS.acquire(timeout=_SLOT_WAIT):
         raise ClaudeError("every Claude slot is busy")
     try:
         tools = ("WebSearch", "WebFetch") if web else ()
-        res = run(prompt, model=model_for(tier), system=system, images=images,
+        res = run(prompt, model=model or model_for(tier), system=system, images=images,
                   tools=tools, allowed=tools, timeout=timeout)
     except ClaudeError as e:
         _note_failure(str(e))
@@ -514,28 +557,55 @@ def ask(prompt: str, tier: str = FAST, system: str = "",
         _ONE_SHOT_SLOTS.release()
     if not res.text:
         raise ClaudeError("Claude returned an empty reply")
-    return res.text
+    return res
+
+
+def ask(prompt: str, tier: str = FAST, system: str = "",
+        images: list[tuple[bytes, str]] | None = None,
+        web: bool = False, timeout: float = 60.0, model: str = "") -> str:
+    """A one-shot answer: no tools (web search only when asked), no skills, no
+    project context. Raises ClaudeError; core/gemini.py turns that into a
+    fallback to its own ladder."""
+    return ask_full(prompt, tier, system=system, images=images, web=web,
+                    timeout=timeout, model=model).text
+
+
+def agent_slots() -> int:
+    """How many agent runs may be alive at once (config: claude_agent_slots)."""
+    return AGENT_SLOTS
 
 
 def agent(task: str, *, append_system: str = "", model: str = "",
           add_dirs: list[str] | None = None, allow_bash: bool = True,
           timeout: float = 600.0,
           on_event: Callable[[dict], None] | None = None,
-          cwd: Path | None = None, extra_bash: tuple[str, ...] = ()) -> Result:
+          cwd: Path | None = None, extra_bash: tuple[str, ...] = (),
+          cancel: threading.Event | None = None,
+          slot_wait: float = _SLOT_WAIT, deny_bash: tuple[str, ...] = ()) -> Result:
     """Claude Code doing a multi-step job in workspace/ — or in `cwd`, with the
     skills found in its .claude/skills — plus `extra_bash` patterns on top of
-    AGENT_BASH. Blocks until it is done; call it from a worker thread."""
-    if not _AGENT_SLOTS.acquire(timeout=_SLOT_WAIT):
-        raise ClaudeError("two Claude tasks are already running — wait for one to finish")
+    AGENT_BASH. Blocks until it is done; call it from a worker thread.
+
+    `slot_wait` is how long to queue for a free agent slot before giving up
+    (a few seconds by default: a voice request should hear "busy", not wait);
+    `cancel` stops the run, or the wait for a slot, as soon as it is set;
+    `deny_bash` patterns are refused even when an allowed pattern matches."""
+    if not _acquire(_AGENT_SLOTS, slot_wait, cancel):
+        if cancel is not None and cancel.is_set():
+            raise ClaudeCancelled("cancelled while waiting for a free slot")
+        raise ClaudeError(f"{AGENT_SLOTS} Claude tasks are already running — "
+                          f"wait for one to finish")
     try:
         tools = tuple(t for t in AGENT_TOOLS if allow_bash or t != "Bash")
         allowed = tuple(t for t in tools if t != "Bash")
         if allow_bash:
             allowed += tuple(f"Bash({p})" for p in AGENT_BASH + tuple(extra_bash))
+        disallowed = tuple(f"Bash({p})" for p in deny_bash) if allow_bash else ()
         return run(task, model=model or model_for(AGENT), append_system=append_system,
-                   tools=tools, allowed=allowed, add_dirs=add_dirs, cwd=cwd,
+                   tools=tools, allowed=allowed, disallowed=disallowed,
+                   add_dirs=add_dirs, cwd=cwd,
                    setting_sources="project", skills=True, timeout=timeout,
-                   on_event=on_event, usage_tag="claude-agent")
+                   on_event=on_event, usage_tag="claude-agent", cancel=cancel)
     except ClaudeError as e:
         _note_failure(str(e))
         raise

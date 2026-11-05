@@ -302,7 +302,8 @@ Gemini Live keeps the voice: it hears you, speaks, and picks the tool. **Everyth
 |---|---|
 | Every one-shot text call | Screen and image reading, file summaries, code, charts from a description, session summaries — Claude first, the Gemini ladder only if Claude is unavailable (not installed, signed out, over its usage limit). Grounded web search stays on Gemini: 2–5 s there against 20 s through Claude. |
 | `ask_claude` | Questions that need real thought are answered by Claude; long answers go on the display. In *task* mode Claude Code works as an agent in the background (files, code, web, skills). |
-| `manage_skills` | Finds a skill among the installed ones and the public catalogue ([anthropics/skills](https://github.com/anthropics/skills)), installs it, or has Claude **write a new one** from your description. Skills live in `workspace/.claude/skills/`. |
+| `manage_skills` | Finds a skill among the installed ones and the public catalogue ([anthropics/skills](https://github.com/anthropics/skills)), installs it, or has Claude **write a new one** from your description. Skills live in `workspace/.claude/skills/` — or, with `space`, in one of the IT skill spaces below. |
+| `agents` | A **team of IT specialists**: a lead plans, one agent per domain (security, network, DevOps, cloud, data…) works with its own skills — two at a time —, a reviewer checks. See *Agents* below. |
 | `create_document` | A PDF (printed by Chromium from Claude's HTML) or a slide deck designed by Claude Opus as an agent: it picks an art direction for the subject (never the look of the last decks, or the `style` the user asked for), builds the slides as a web page, checks and fixes them in Chromium, then `core/html_deck.py` converts the page to PowerPoint (design as each slide's background, words as editable text boxes). Each deck also ships as a self-contained web presentation (`.html`) and, unless `motion` is false, a motion-design MP4 made by a second agent. Saved in `Documents/JARVIS/documents` and `Videos/JARVIS/motion`. |
 | `create_motion_video` | Motion design: Claude writes the animation, it is rendered frame by frame on a virtual clock and encoded to H.264, Claude reviews four frames and fixes what it sees. Plays on the HUD; saved in `Videos/JARVIS/motion` with its HTML. |
 
@@ -388,6 +389,57 @@ Sources can be handed in at creation (`sources`: a brief, a cahier des charges i
 
 ---
 
+## 🤖 Agents — a team of IT specialists
+
+*"Monte une équipe d'agents pour sécuriser et dockeriser mon API Flask"* — *"Demande à l'agent réseau un plan d'adressage pour trois VLAN"* — *"Propose-moi d'abord le plan"* — *"Où en est la mission ?"* — *"Arrête les agents"*
+
+`ask_claude`'s task mode is one agent doing everything with every skill in sight. The `agents` tool is a **team**: a lead splits the request into tasks, each task goes to the specialist of one IT domain, and a reviewer checks the result.
+
+```
+request ─► lead         one Claude call, no tools: the plan — tasks, each owned by one
+                        specialist, with deliverables, acceptance criteria, dependencies
+        ─► specialists  one fresh Claude Code agent per task, two at a time when the
+                        tasks are independent, each seeing ONLY its own domain's skills
+        ─► checks       the assistant checks every task itself — handoff written,
+                        deliverables there — and sends what is missing back, once
+        ─► reviewer     reads the handoffs and deliverables against the criteria, writes
+                        REPORT.md, lists issues; each issue gets one correction run
+```
+
+| Action | |
+|---|---|
+| `create` | A mission: plan, specialists, review, report — in the background |
+| `plan` | The plan only, on the display; `continue` starts it |
+| `delegate` | One specialist does one task — no plan, no review (the space is named, or found from the request's words) |
+| `continue` | Runs what is not done yet: a task left partial, failed, blocked, stopped, or interrupted by closing the app |
+| `cancel` | Stops a running mission within a second or two; what is done is kept |
+| `status`, `list`, `open`, `spaces` | Read a mission, the missions, its folder, the specialists |
+
+`target` points the team at your own code: a folder, a file, or the name of one of your **projects** — never a whole tree: your home folder, Documents, the Desktop, a drive root or a system folder are refused, since the agents may change what they are given. Each mission lives in `Documents/JARVIS/agents/<name>/`: deliverables and `REPORT.md` in `work/`, what each specialist did in `handoffs/T1.md…`, the plan in `PLAN.md`.
+
+**The specialists hand over through files, not transcripts.** A specialist starts fresh and reads only the handoffs of the tasks it builds on — a few kilobytes — where a single long agent would carry everything it ever read into every later turn.
+
+Built to spend as little as it can:
+
+- **The plan is one call without tools**, and a delegation skips it.
+- **The lead is told every task is an agent run** and to use as few as the request allows — five at most (`agents_max_tasks`).
+- **A specialist sees its own domain's skills only** — not sixteen domains of skill descriptions on every turn.
+- **Specialists and the reviewer run on Sonnet** (`agents_models`, `agents_model`, `agents_review_model`); only the lead uses the smart tier.
+- **Checking is the assistant's, for free.** Correction runs get the exact problems and happen once. A one-task mission is not reviewed unless asked.
+- **It never locks the rest of the app out.** All missions together hold at most `claude_agent_slots − 1` agent slots (three slots by default, up from two), so documents, projects and `ask_claude` always have one.
+
+`status` shows each task, its model, minutes and tokens, and the review. Like projects, the team needs Claude and is hidden in *Gemini only* mode.
+
+## 🧰 Skill spaces — one per IT domain
+
+`skill_spaces/` holds one folder per domain — **programming, web, mobile, desktop, cyber, network, infra, cloud, devops, database, data, ml, ai-agents, design, qa, architecture** — and each is the toolbox of one specialist: a `SPACE.md` (its role, the words that route work to it, its model, its shell presets) and its skills. Each space starts with one skill written for it, and four of them bring a tested tool: a secret scanner (`cyber`), a VLSM subnet planner (`network`), a WCAG contrast checker (`design`) and a CSV profiler (`data`), all standard-library Python.
+
+Spaces grow by voice: *"crée un skill Terraform pour l'espace infra"*, *"installe un skill de pentest dans l'espace cyber"*, *"liste les skills de l'espace réseau"* — `manage_skills` with a `space`. A skill in a space is used by that specialist and paid for by no other Claude run.
+
+A specialist's shell access is an allowlist, and a space can only add **named presets** (`git-read`, `python-dev`, `net-read`…) whose commands are defined in `core/spaces.py`: nothing in a space — or in a skill downloaded into one — can widen it. None of them deletes, deploys, pushes, applies infrastructure or scans another machine; specialists write the files and list those commands for you. Details, presets and settings: [skill_spaces/README.md](skill_spaces/README.md). `python -m core.spaces --check` validates every space.
+
+---
+
 ## 📋 Requirements
 
 | Requirement | Details |
@@ -434,10 +486,13 @@ Mark LV/
 │   ├── video_player.py       # Plays video on the HUD, where the avatar normally is
 │   ├── project.py            # Software projects, one folder each, built step by step with Replica
 │   ├── scrum.py              # Scrum deliverables, one workspace each, drawn locally
+│   ├── agents.py             # The agent team, by voice: missions, delegation, status
 │   └── desktop.py            # Desktop and taskbar control
 ├── skill_packs/
 │   ├── replica/              # Replica skills (MIT), copied into each project — not loaded globally
 │   └── scrum/                # Scrum skills + render.py, copied into each workspace
+├── skill_spaces/             # One folder of skills per IT domain, one specialist agent each
+│   └── <domain>/SPACE.md     #   the specialist's role, routing words, model, shell presets
 ├── memory/
 │   ├── memory_manager.py     # Load/save long_term.json — sessions, monitors, identity
 │   ├── config_manager.py     # api_keys.json access — key, OS, name, voice, colour, toggles
@@ -445,6 +500,9 @@ Mark LV/
 ├── core/
 │   ├── gemini.py             # One place for every one-shot Gemini call — model ladder, timeouts, cooldowns
 │   ├── gateway.py            # Free LLM gateway (OmniRoute / FreeLLMAPI) — a rung before or after Claude
+│   ├── claude.py             # Claude Code runs — one-shot calls and agents, slots, cancellation
+│   ├── orchestrator.py       # The agent team — lead, specialists in parallel, checks, reviewer
+│   ├── spaces.py             # Skill spaces — discovery, routing, shell presets, --check
 │   ├── usage.py              # Tokens spent per engine per day (config/usage.json)
 │   ├── prompt.txt            # All prompt wording — {tokens} are filled from the live system at startup
 │   ├── avatar.py             # Avatar renderer — lighting, pose, expression, mouth (QPainter)
