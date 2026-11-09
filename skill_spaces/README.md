@@ -5,6 +5,26 @@ of the agent team (`actions/agents.py`, `core/orchestrator.py`): when a mission
 gives a task to the `cyber` specialist, that agent runs in a folder whose
 `.claude/skills/` holds the skills of `skill_spaces/cyber/` — and nothing else.
 
+## Two purposes
+
+A skill serves one of two kinds of work, and every skill should be written so
+it holds for both:
+
+- **Improving Jarvis** — the mission's target is this repository. The agent
+  changes the assistant itself: it follows the repository's conventions
+  (`readme.md`, module docstrings), never touches the user's keys and data,
+  and answers only for what it changes in an existing codebase.
+- **Building another project** — the mission's work folder, or a target that
+  is the user's project (or a project of `actions/project.py`). The agent
+  builds a product for the user, from scratch or on top of existing code.
+
+The agent is told which, folder by folder (`core/quality.describe`), and an
+agent working on Jarvis also gets `core/quality.SELF_RULES`. So a skill says
+"the folder you work in", never "the client's app" or "Jarvis": the same
+`licensing-copyright` skill audits Jarvis's own assets and a site built for
+someone. What only makes sense for one kind (legal pages for a public site,
+for example) says so.
+
 | Space | Specialist |
 |---|---|
 | `programming` | Writing, fixing, refactoring and explaining code in any language |
@@ -23,14 +43,33 @@ gives a task to the `cyber` specialist, that agent runs in a folder whose
 | `design` | UI/UX, design systems, accessibility (WCAG) |
 | `qa` | Test strategy, unit / integration / end-to-end tests |
 | `architecture` | Architecture decisions (ADR), C4, patterns |
+| `legal` | GDPR by design, licences and copyright of assets, code and dependencies, legal pages |
 
 `python -m core.spaces` lists them with their skills;
 `python -m core.spaces --check` validates every space and skill.
 
+## Rules every specialist gets, and the assistant's check
+
+`core/quality.py` holds two short blocks added to the system prompt of every
+specialist and of every project step (`actions/project.py`): **CODE_RULES**
+(code and markup formatted for a person to maintain, never minified by hand)
+and **LEGAL_RULES** (no asset, link, font, tracker, personal data or code that
+could bring a copyright, licence, trademark or GDPR claim; every asset in
+`credits.json`).
+
+Before and after each run the assistant scans every folder the run may write
+in — the work folder and the targets, Jarvis included — with
+`legal/licensing-copyright/legal_scan.py` (its own copy, never the one in the
+run folder), and sends back only the errors the run added: an agent on an
+existing codebase answers for its changes, not for what was already there.
+What is still wrong after it leaves the task `partial`, with the findings
+in the mission state (`legal`), never `done`. The `legal` specialist does
+the full audit and the legal pages when a mission asks for them.
+
 ## Why spaces, and not one skills folder
 
 Claude Code lists every skill it can see to the model on every turn of an
-agent run. Put sixteen domains of skills in `workspace/.claude/skills/` and
+agent run. Put seventeen domains of skills in `workspace/.claude/skills/` and
 every `ask_claude` task pays for all of them, in tokens — and a security agent
 choosing among Flutter and Terraform skills chooses worse. A space is copied
 only into the run folder of the specialist that needs it, like the packs in

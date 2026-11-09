@@ -76,8 +76,8 @@ RUNS = 10_000
 SEED = 2026
 COST_CATEGORIES = ("licences", "infra", "outils", "sous-traitance", "materiel", "formation", "juridique",
                    "securite", "autre")
-RUN_CATEGORIES = ("hebergement", "maintenance", "evolutions", "licences", "services", "support", "exploitation",
-                  "securite", "conformite", "formation", "autre")
+RUN_CATEGORIES = ("hebergement", "maintenance", "evolutions", "licences", "services", "support",
+                  "exploitation", "securite", "conformite", "formation", "autre")
 PRICING = ("forfait", "regie", "interne")
 # Sections a pitch must have: any of the words, in a heading.
 PITCH_SECTIONS = (
@@ -263,7 +263,8 @@ def read_wbs(w, backlog, c: Check) -> dict | None:
                     c.err(F, f"{i}: {s} is not in scrum/product-backlog.json")
                     continue
                 if items[s].get("priority") == "wont":
-                    c.warn(F, f"{i}: {s} is \"wont\" in the backlog — out of scope, move it to the exclusions")
+                    c.warn(F, f"{i}: {s} is \"wont\" in the backlog — out of scope, move it to "
+                              "the exclusions")
                 if s in seen:
                     c.warn(F, f"{s} is in both {seen[s]} and {i} — one work package per backlog item")
                 seen.setdefault(s, i)
@@ -401,8 +402,8 @@ def cross_check(cc, W: dict, backlog, c: Check) -> dict | None:
         pm = 2.94 * math.prod(em) * kloc ** e
         months = 3.67 * pm ** (0.28 + 0.2 * (e - 0.91))
         return {"method": "COCOMO II", "effort": pm * PM_HOURS / hpd, "months": months,
-                "detail": f"2,94 × EM {g(math.prod(em), 2)} × {g(kloc)}^{g(e, 3)} = {g(pm, 1)} personnes-mois · "
-                          f"durée {g(months, 1)} mois"}
+                "detail": f"2,94 × EM {g(math.prod(em), 2)} × {g(kloc)}^{g(e, 3)} = "
+                          f"{g(pm, 1)} personnes-mois · durée {g(months, 1)} mois"}
 
     if m in ("velocite", "velocity", "planning-poker", "story-points"):
         pts = num(cc.get("points")) if "points" in cc else backlog_points(backlog)
@@ -419,9 +420,10 @@ def cross_check(cc, W: dict, backlog, c: Check) -> dict | None:
         lo_v, hi_v = sorted(vel)
         s_lo, s_hi = math.ceil(pts / hi_v), math.ceil(pts / lo_v)
         e_lo, e_hi = s_lo * sd * team, s_hi * sd * team
-        return {"method": "Vélocité (story points)", "effort": (e_lo + e_hi) / 2, "range": [e_lo, e_hi],
-                "detail": f"{g(pts)} points {source} ÷ {g(lo_v)}–{g(hi_v)} pts/sprint = {s_lo}–{s_hi} sprints "
-                          f"× {g(sd)} j × {g(team)} pers."}
+        return {"method": "Vélocité (story points)", "effort": (e_lo + e_hi) / 2,
+                "range": [e_lo, e_hi],
+                "detail": f"{g(pts)} points {source} ÷ {g(lo_v)}–{g(hi_v)} pts/sprint = "
+                          f"{s_lo}–{s_hi} sprints × {g(sd)} j × {g(team)} pers."}
 
     if m in ("analogie", "analogy", "expert", "jugement-d-expert", "jugement-expert"):
         effort = num(cc.get("effort"))
@@ -673,7 +675,8 @@ def compute_budget(b, E: dict, W: dict, c: Check) -> dict | None:
         return v
 
     per_profile = {pid: {"jh": 0.0, "cost": 0.0} for pid in profiles}
-    lines = [(r["id"], r["expected"]) for r in E["packages"]] + [(oh["label"], oh["effort"]) for oh in E["overheads"]]
+    lines = ([(r["id"], r["expected"]) for r in E["packages"]]
+             + [(oh["label"], oh["effort"]) for oh in E["overheads"]])
     for target, jh in lines:
         for pid, share in split(target).items():
             per_profile[pid]["jh"] += jh * share
@@ -933,122 +936,165 @@ def eur(x: float) -> str:
     return fr(x, 0) + " €"
 
 
+def row(*cells) -> str:
+    """One line of a Markdown table: row("a", "", 3) -> "| a | | 3 |"."""
+    return "|" + "|".join(f" {c} " if c != "" else " " for c in map(str, cells)) + "|"
+
+
 def report(S: dict, W: dict, wbs: dict) -> str:
+    """livrables/chiffrage.md: every computed figure, one section per step."""
     E, B, T = S.get("estimation"), S.get("budget"), S.get("tco")
     out = [f"# Chiffrage — {wbs.get('project', '')}".rstrip(" —"), "",
            f"_Calculé par chiffrage.py le {dt.date.today().isoformat()} à partir de chiffrage/*.json. "
            "Ne pas modifier ce fichier : corriger les JSON et relancer._", ""]
     if E:
-        d = E["duration"]
-        out += ["## En bref", "", "| | |", "|---|---|",
-                f"| Charge attendue (P50) | {fr(E['expected'])} jh |",
-                f"| Engagement (P{round(E['confidence'] * 100)}) | {fr(E['commit'])} jh |",
-                f"| Délai P80 | {fr(d['monte_carlo']['p80'])} jours ouvrés"
-                + (f", fin le {d['finish_p80']}" if d.get("finish_p80") else "") + " |"]
-        if B:
-            out.append(f"| Prix {B['pricing']} HT | {eur(B['price_ht'])} (sans provision : {eur(B['price_p50_ht'])}) |")
-        if T:
-            out.append(f"| TCO {T['years']} ans | {eur(T['tco'])} (run : {pc(T['run_share'])}) |")
-        out.append("")
-
-        out += ["## 1. WBS et estimation PERT (jours-homme)", "",
-                "| Lot | Livrable | O | M | P | Dp | σ |", "|---|---|--:|--:|--:|--:|--:|"]
-        for r in E["packages"]:
-            tag = " *(indirect)*" if r["kind"] == "indirect" else ""
-            out.append(f"| {r['id']} {r['title']}{tag} | {r['deliverable']} | {fr(r['o'])} | {fr(r['m'])} | "
-                       f"{fr(r['p'])} | **{fr(r['expected'])}** | {fr(r['sigma'], 2)} |")
-        out.append(f"| **Lots de travaux** | | | | | **{fr(E['leaves_expected'])}** | "
-                   f"{fr(math.sqrt(sum(r['sigma'] ** 2 for r in E['packages'])), 2)} |")
-        for oh in E["overheads"]:
-            out.append(f"| {oh['label']} ({pc(oh['rate'])}) | | | | | {fr(oh['effort'])} | |")
-        out += [f"| **Total** | | | | | **{fr(E['expected'])}** | {fr(E['sigma'], 2)} |", "",
-                f"Dp = (O + 4M + P) / 6 · σ = (P − O) / 6 · σ total = √Σσ² · développement pur : "
-                f"{pc(E['dev_share'])} de la charge.", ""]
-
-        mc = E["monte_carlo"]
-        out += ["## 2. Une estimation est une probabilité", "",
-                f"| | Loi normale (PERT) | Monte Carlo ({fr(mc['runs'], 0)} tirages, loi bêta) |",
-                "|---|--:|--:|",
-                f"| P50 | {fr(E['expected'])} jh | {fr(mc['p50'])} jh |",
-                f"| P80 | {fr(E['p80'])} jh | {fr(mc['p80'])} jh |",
-                f"| P90 | {fr(E['p90'])} jh | {fr(mc['p90'])} jh |", ""]
-        if E["cone"]:
-            cn = E["cone"]
-            out += [f"Cône d'incertitude, phase « {cn['label']} » : × {fr(cn['low'], 2)} à × {fr(cn['high'], 2)}, "
-                    f"soit {fr(cn['range'][0])} à {fr(cn['range'][1])} jh autour du P50. Les lots sont supposés "
-                    "indépendants : en réalité leurs erreurs vont dans le même sens, la vraie fourchette est "
-                    "plus large que le PERT.", ""]
-
-        if E["cross_checks"]:
-            out += ["## 3. Méthodes croisées", "", "| Méthode | Charge | Écart / PERT | Calcul |",
-                    "|---|--:|--:|---|"]
-            for r in E["cross_checks"]:
-                rng = f" ({fr(r['range'][0], 0)}–{fr(r['range'][1], 0)})" if r.get("range") else ""
-                out.append(f"| {r['method']} | {fr(r['effort'])} jh{rng} | × {fr(r['ratio'], 2)} | {r['detail']} |")
-            out.append("")
-
-        out += ["## 4. Délai et chemin critique", "",
-                f"- Chemin critique (ressources illimitées) : {' → '.join(d['critical_path'])} — "
-                f"{fr(d['cpm_days'])} jours ouvrés."]
-        if d["workload_days"]:
-            out.append(f"- Charge des lots ÷ équipe de {fr(E['team'], 0)} : {fr(d['workload_days'])} jours ouvrés.")
-        out.append(f"- Délai Monte Carlo : P50 {fr(d['monte_carlo']['p50'])} j · P80 {fr(d['monte_carlo']['p80'])} j"
-                   f" · P90 {fr(d['monte_carlo']['p90'])} j.")
-        if d.get("start"):
-            out.append(f"- Début le {d['start']} → fin P50 le {d['finish_p50']}, P80 le {d['finish_p80']} "
-                       "(jours fériés non comptés).")
-        if d["slack"]:
-            out.append("- Marges : " + ", ".join(f"{i} {fr(s)} j" for i, s in sorted(
-                d["slack"].items(), key=lambda kv: idkey(kv[0]))) + ".")
-        out.append("")
-
+        out += _report_summary(E, B, T)
+        out += _report_estimation(E)
+        out += _report_probability(E)
+        out += _report_cross_checks(E)
+        out += _report_duration(E)
     if B:
-        out += [f"## 5. Budget ({B['pricing']})", "", "| Poste | Jours | Taux | Montant |", "|---|--:|--:|--:|"]
-        for p in B["profiles"]:
-            if p["jh"]:
-                out.append(f"| {p['title']} | {fr(p['jh'])} | {eur(p['rate'])} | {eur(p['cost'])} |")
-        out.append(f"| **Équipe** | {fr(B['labour_jh'])} | {eur(B['average_rate'])} | **{eur(B['labour'])}** |")
-        for x in B["costs"]:
-            out.append(f"| {x['label']} ({x['category']}) | | | {eur(x['amount'])} |")
-        out += [f"| Provision pour risques — {B['contingency_basis']} | | | {eur(B['contingency'])} |",
-                f"| Réserve de gestion ({pc(B['management_reserve_rate'])}) | | | {eur(B['management_reserve'])} |",
-                f"| **Coût total** | | | **{eur(B['cost_total'])}** |",
-                f"| Marge ({pc(B['margin_rate'])}) | | | {eur(B['margin'])} |",
-                f"| **Prix HT** | | | **{eur(B['price_ht'])}** |",
-                f"| TVA ({pc(B['vat_rate'])}) | | | {eur(B['vat'])} |",
-                f"| **Prix TTC** | | | **{eur(B['price_ttc'])}** |", ""]
-        if B["schedule"]:
-            out += ["Échéancier : " + " · ".join(f"{s['label']} {pc(s['share'])} = {eur(s['amount'])} HT"
-                                                 for s in B["schedule"]), ""]
-
+        out += _report_budget(B)
     if T:
-        ys = range(T["years"] + 1)
-        out += [f"## 6. TCO sur {T['years']} ans", "",
-                "| Poste | " + " | ".join(f"An {y}" for y in ys) + " | Total |",
-                "|---|" + "--:|" * (T["years"] + 2),
-                f"| Build | {eur(T['build'])} | " + " | ".join("" for _ in range(T["years"])) + f" | {eur(T['build'])} |"]
-        for r in T["run"]:
-            out.append(f"| {r['label']} | | " + " | ".join(eur(r["years"][y]) for y in ys if y)
-                       + f" | {eur(r['total'])} |")
-        if T["end_of_life"]:
-            out.append(f"| Fin de vie / réversibilité | " + " | ".join("" for _ in range(T["years"]))
-                       + f" | {eur(T['end_of_life'])} | {eur(T['end_of_life'])} |")
-        out += ["| **Total** | " + " | ".join(f"**{eur(v)}**" for v in T["per_year"]) + f" | **{eur(T['tco'])}** |",
-                "", f"Run : {eur(T['run_total'])} sur {T['years']} ans, {pc(T['run_share'])} du TCO.", ""]
-        for a in T["alternatives"]:
-            diff = a["total"] - T["tco"]
-            out.append(f"- Alternative « {a['label']} » : {eur(a['total'])} sur {T['years']} ans "
-                       f"({'+' if diff >= 0 else '−'}{eur(abs(diff))} par rapport au projet).")
-        if T["gains"]:
-            out.append(f"- Gains : {eur(sum(T['gains']))} sur {T['years']} ans · ROI {pc(T['roi'])} · "
-                       + (f"retour sur investissement l'année {T['payback_year']}." if T["payback_year"] is not None
-                          else f"pas rentabilisé en {T['years']} ans."))
-        out.append("")
-
+        out += _report_tco(T)
     for title, k in (("Hypothèses", "assumptions"), ("Exclusions", "exclusions")):
         if wbs.get(k):
             out += [f"## {title}", ""] + [f"- {x}" for x in wbs[k]] + [""]
     return "\n".join(out)
+
+
+def _report_summary(E: dict, B: dict | None, T: dict | None) -> list[str]:
+    d = E["duration"]
+    finish = f", fin le {d['finish_p80']}" if d.get("finish_p80") else ""
+    out = ["## En bref", "", "| | |", "|---|---|",
+           row("Charge attendue (P50)", f"{fr(E['expected'])} jh"),
+           row(f"Engagement (P{round(E['confidence'] * 100)})", f"{fr(E['commit'])} jh"),
+           row("Délai P80", f"{fr(d['monte_carlo']['p80'])} jours ouvrés{finish}")]
+    if B:
+        out.append(row(f"Prix {B['pricing']} HT",
+                       f"{eur(B['price_ht'])} (sans provision : {eur(B['price_p50_ht'])})"))
+    if T:
+        out.append(row(f"TCO {T['years']} ans", f"{eur(T['tco'])} (run : {pc(T['run_share'])})"))
+    return out + [""]
+
+
+def _report_estimation(E: dict) -> list[str]:
+    out = ["## 1. WBS et estimation PERT (jours-homme)", "",
+           "| Lot | Livrable | O | M | P | Dp | σ |", "|---|---|--:|--:|--:|--:|--:|"]
+    for r in E["packages"]:
+        tag = " *(indirect)*" if r["kind"] == "indirect" else ""
+        out.append(row(f"{r['id']} {r['title']}{tag}", r["deliverable"], fr(r["o"]), fr(r["m"]),
+                       fr(r["p"]), f"**{fr(r['expected'])}**", fr(r["sigma"], 2)))
+    sigma_packages = math.sqrt(sum(r["sigma"] ** 2 for r in E["packages"]))
+    out.append(row("**Lots de travaux**", "", "", "", "", f"**{fr(E['leaves_expected'])}**",
+                   fr(sigma_packages, 2)))
+    for oh in E["overheads"]:
+        out.append(row(f"{oh['label']} ({pc(oh['rate'])})", "", "", "", "", fr(oh["effort"]), ""))
+    out.append(row("**Total**", "", "", "", "", f"**{fr(E['expected'])}**", fr(E["sigma"], 2)))
+    return out + ["", "Dp = (O + 4M + P) / 6 · σ = (P − O) / 6 · σ total = √Σσ² · développement pur : "
+                      f"{pc(E['dev_share'])} de la charge.", ""]
+
+
+def _report_probability(E: dict) -> list[str]:
+    mc = E["monte_carlo"]
+    out = ["## 2. Une estimation est une probabilité", "",
+           f"| | Loi normale (PERT) | Monte Carlo ({fr(mc['runs'], 0)} tirages, loi bêta) |",
+           "|---|--:|--:|"]
+    for q, normal in (("p50", E["expected"]), ("p80", E["p80"]), ("p90", E["p90"])):
+        out.append(row(q.upper(), f"{fr(normal)} jh", f"{fr(mc[q])} jh"))
+    out.append("")
+    if E["cone"]:
+        cn = E["cone"]
+        out += [f"Cône d'incertitude, phase « {cn['label']} » : × {fr(cn['low'], 2)} à "
+                f"× {fr(cn['high'], 2)}, soit {fr(cn['range'][0])} à {fr(cn['range'][1])} jh autour "
+                "du P50. Les lots sont supposés indépendants : en réalité leurs erreurs vont dans le "
+                "même sens, la vraie fourchette est plus large que le PERT.", ""]
+    return out
+
+
+def _report_cross_checks(E: dict) -> list[str]:
+    if not E["cross_checks"]:
+        return []
+    out = ["## 3. Méthodes croisées", "", "| Méthode | Charge | Écart / PERT | Calcul |",
+           "|---|--:|--:|---|"]
+    for r in E["cross_checks"]:
+        spread = f" ({fr(r['range'][0], 0)}–{fr(r['range'][1], 0)})" if r.get("range") else ""
+        out.append(row(r["method"], f"{fr(r['effort'])} jh{spread}", f"× {fr(r['ratio'], 2)}",
+                       r["detail"]))
+    return out + [""]
+
+
+def _report_duration(E: dict) -> list[str]:
+    d = E["duration"]
+    mc = d["monte_carlo"]
+    out = ["## 4. Délai et chemin critique", "",
+           f"- Chemin critique (ressources illimitées) : {' → '.join(d['critical_path'])} — "
+           f"{fr(d['cpm_days'])} jours ouvrés."]
+    if d["workload_days"]:
+        out.append(f"- Charge des lots ÷ équipe de {fr(E['team'], 0)} : "
+                   f"{fr(d['workload_days'])} jours ouvrés.")
+    out.append(f"- Délai Monte Carlo : P50 {fr(mc['p50'])} j · P80 {fr(mc['p80'])} j · "
+               f"P90 {fr(mc['p90'])} j.")
+    if d.get("start"):
+        out.append(f"- Début le {d['start']} → fin P50 le {d['finish_p50']}, P80 le {d['finish_p80']} "
+                   "(jours fériés non comptés).")
+    if d["slack"]:
+        slack = sorted(d["slack"].items(), key=lambda kv: idkey(kv[0]))
+        out.append("- Marges : " + ", ".join(f"{i} {fr(s)} j" for i, s in slack) + ".")
+    return out + [""]
+
+
+def _report_budget(B: dict) -> list[str]:
+    out = [f"## 5. Budget ({B['pricing']})", "",
+           "| Poste | Jours | Taux | Montant |", "|---|--:|--:|--:|"]
+    for p in B["profiles"]:
+        if p["jh"]:
+            out.append(row(p["title"], fr(p["jh"]), eur(p["rate"]), eur(p["cost"])))
+    out.append(row("**Équipe**", fr(B["labour_jh"]), eur(B["average_rate"]),
+                   f"**{eur(B['labour'])}**"))
+    for x in B["costs"]:
+        out.append(row(f"{x['label']} ({x['category']})", "", "", eur(x["amount"])))
+    totals = (
+        (f"Provision pour risques — {B['contingency_basis']}", eur(B["contingency"])),
+        (f"Réserve de gestion ({pc(B['management_reserve_rate'])})", eur(B["management_reserve"])),
+        ("**Coût total**", f"**{eur(B['cost_total'])}**"),
+        (f"Marge ({pc(B['margin_rate'])})", eur(B["margin"])),
+        ("**Prix HT**", f"**{eur(B['price_ht'])}**"),
+        (f"TVA ({pc(B['vat_rate'])})", eur(B["vat"])),
+        ("**Prix TTC**", f"**{eur(B['price_ttc'])}**"),
+    )
+    out += [row(label, "", "", amount) for label, amount in totals] + [""]
+    if B["schedule"]:
+        steps = (f"{s['label']} {pc(s['share'])} = {eur(s['amount'])} HT" for s in B["schedule"])
+        out += ["Échéancier : " + " · ".join(steps), ""]
+    return out
+
+
+def _report_tco(T: dict) -> list[str]:
+    run_years = range(1, T["years"] + 1)
+    blanks = [""] * T["years"]
+    eol = eur(T["end_of_life"])
+    out = [f"## 6. TCO sur {T['years']} ans", "",
+           row("Poste", *(f"An {y}" for y in range(T["years"] + 1)), "Total"),
+           "|---|" + "--:|" * (T["years"] + 2),
+           row("Build", eur(T["build"]), *blanks, eur(T["build"]))]
+    for r in T["run"]:
+        out.append(row(r["label"], "", *(eur(r["years"][y]) for y in run_years), eur(r["total"])))
+    if T["end_of_life"]:
+        out.append(row("Fin de vie / réversibilité", *blanks, eol, eol))
+    out += [row("**Total**", *(f"**{eur(v)}**" for v in T["per_year"]), f"**{eur(T['tco'])}**"), "",
+            f"Run : {eur(T['run_total'])} sur {T['years']} ans, {pc(T['run_share'])} du TCO.", ""]
+    for a in T["alternatives"]:
+        diff = a["total"] - T["tco"]
+        sign = "+" if diff >= 0 else "−"
+        out.append(f"- Alternative « {a['label']} » : {eur(a['total'])} sur {T['years']} ans "
+                   f"({sign}{eur(abs(diff))} par rapport au projet).")
+    if T["gains"]:
+        payback = (f"retour sur investissement l'année {T['payback_year']}."
+                   if T["payback_year"] is not None else f"pas rentabilisé en {T['years']} ans.")
+        out.append(f"- Gains : {eur(sum(T['gains']))} sur {T['years']} ans · ROI {pc(T['roi'])} · "
+                   f"{payback}")
+    return out + [""]
 
 
 # ── Main ────────────────────────────────────────────────────────────────────

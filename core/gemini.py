@@ -265,7 +265,13 @@ def _cool(model: str, seconds: float = _COOLDOWN_SECONDS) -> None:
 
 
 def is_quota_error(err: str) -> bool:
-    return "429" in err or "RESOURCE_EXHAUSTED" in err
+    # REST answers 429 / RESOURCE_EXHAUSTED. A Live socket closes with a 1011
+    # and words instead: "You exceeded your current quota", "Resource has been
+    # exhausted" — neither of which contains those two tokens.
+    low = err.lower()
+    return ("429" in err or "RESOURCE_EXHAUSTED" in err
+            or "exceeded your current quota" in low
+            or "resource has been exhausted" in low)
 
 
 def is_unavailable_error(err: str) -> bool:

@@ -40,6 +40,7 @@ import json
 import math
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 
 # (page stem = json stem, the step of the pipeline that writes it)
@@ -2950,6 +2951,147 @@ def dashboard(c: Ctx) -> str:
     return _page(c.t("dashboard"), body, c, back=False, nav=nav)
 
 
+# ── Readable output ──────────────────────────────────────────────────────────
+#
+# The pages are assembled as long strings, which is quick to write and to
+# test but leaves one line of 200 000 characters in the file. Before a page is
+# written it is laid out like a person would: one element per line, indented
+# two spaces per level. Only whitespace between elements changes, never where
+# it shows: the text of a paragraph, a table cell or an SVG <text> stays on
+# its line exactly as built, <script> and <pre> are copied as is, and the CSS
+# is only re-indented. Hand edits to livrables/ are lost at the next render:
+# change the JSON in scrum/, or the drawing code here.
+
+_VOID = frozenset("area base br col embed hr img input link meta source track wbr".split())
+# Elements that sit inside a line of text: kept on their parent's line.
+_INLINE = frozenset("a abbr b bdi bdo br button cite code data del dfn em i img input ins kbd label "
+                    "mark q s samp select small span strong sub sup time u var wbr".split())
+# Copied character for character: their whitespace is content.
+_VERBATIM = frozenset("pre textarea script style".split())
+# SVG text and short titles: one line each, whatever they hold.
+_ONE_LINE = frozenset("text title desc option".split())
+_INDENT = "  "
+
+
+class _Node:
+    __slots__ = ("name", "start", "end", "children")
+
+    def __init__(self, name: str, start: str):
+        self.name, self.start, self.end, self.children = name, start, "", []
+
+
+class _Tree(HTMLParser):
+    """The page as a tree, keeping every tag exactly as it was written."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.root = _Node("", "")
+        self.stack = [self.root]
+
+    def _add(self, item) -> None:
+        self.stack[-1].children.append(item)
+
+    def handle_starttag(self, tag, attrs):
+        raw = self.get_starttag_text()
+        node = _Node(re.match(r"<\s*([^\s/>]+)", raw).group(1), raw)
+        self._add(node)
+        if tag not in _VOID:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        self._add(_Node(tag, self.get_starttag_text()))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i].name.lower() == tag:
+                self.stack[i].end = f"</{self.stack[i].name}>"
+                del self.stack[i:]
+                return
+        self._add(f"</{tag}>")              # a stray end tag: kept where it was
+
+    def handle_data(self, data):
+        self._add(data)
+
+    def handle_entityref(self, name):
+        self._add(f"&{name};")
+
+    def handle_charref(self, name):
+        self._add(f"&#{name};")
+
+    def handle_comment(self, data):
+        self._add(_Node("!--", f"<!--{data}-->"))
+
+    def handle_decl(self, decl):
+        self._add(_Node("!", f"<!{decl}>"))
+
+    def handle_pi(self, data):
+        self._add(_Node("?", f"<?{data}>"))
+
+    def unknown_decl(self, data):
+        self._add(_Node("!", f"<![{data}]>"))
+
+
+def _flat(item) -> str:
+    """The item exactly as it was written."""
+    if isinstance(item, str):
+        return item
+    return item.start + "".join(_flat(c) for c in item.children) + item.end
+
+
+def _is_inline(item) -> bool:
+    if isinstance(item, str):
+        return True
+    return item.name.lower() in _INLINE and all(_is_inline(c) for c in item.children)
+
+
+def _lay_out(node: _Node, depth: int, lines: list[str]) -> None:
+    pad = _INDENT * depth
+    name = node.name.lower()
+    if name == "style" and node.end:            # CSS ignores indentation: one rule per line
+        css = [line.strip() for line in "".join(_flat(c) for c in node.children).splitlines()]
+        lines.append(pad + node.start)
+        lines.extend(pad + _INDENT + line for line in css if line)
+        lines.append(pad + node.end)
+        return
+    if (not node.children or name in _VERBATIM or name in _ONE_LINE
+            or all(_is_inline(c) for c in node.children)):
+        lines.append(pad + _flat(node))
+        return
+    lines.append(pad + node.start)
+    run: list[str] = []
+
+    def flush():
+        text = "".join(run).strip()
+        if text:
+            lines.append(_INDENT * (depth + 1) + text)
+        run.clear()
+
+    for child in node.children:
+        if _is_inline(child):
+            run.append(_flat(child))
+        else:
+            flush()
+            _lay_out(child, depth + 1, lines)
+    flush()
+    if node.end:
+        lines.append(pad + node.end)
+
+
+def pretty_html(page: str) -> str:
+    """The page laid out one element per line, indented; renders the same."""
+    tree = _Tree()
+    tree.feed(page)
+    tree.close()
+    lines: list[str] = []
+    for child in tree.root.children:
+        if isinstance(child, str):
+            if child.strip():
+                lines.append(child.strip())
+        else:
+            _lay_out(child, 0, lines)
+    return "\n".join(lines) + "\n"
+
+
 def render(c: Ctx, out: Path) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     written = []
@@ -2958,12 +3100,12 @@ def render(c: Ctx, out: Path) -> list[Path]:
         if source(stem) in c.data:
             page = (cdc_document(c) if stem == "cahier-des-charges"
                     else _page(c.t(stem), _section(stem, c, True), c, back=True))
-            target.write_text(page, encoding="utf-8")
+            target.write_text(pretty_html(page), encoding="utf-8")
             written.append(target)
         elif target.exists():
             target.unlink()                      # a deleted JSON takes its page with it
     index = out / "index.html"
-    index.write_text(dashboard(c), encoding="utf-8")
+    index.write_text(pretty_html(dashboard(c)), encoding="utf-8")
     written.append(index)
     return written
 

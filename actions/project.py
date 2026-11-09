@@ -51,7 +51,7 @@ import threading
 import unicodedata
 from pathlib import Path
 
-from core import claude, jobs
+from core import claude, jobs, quality
 from core.user_dirs import jarvis_documents_dir
 
 if getattr(sys, "frozen", False):
@@ -115,6 +115,10 @@ _IDEA_DESIGN = (" There is no original to measure: design an original system tha
                 "fits the brief in CLAUDE.md.")
 _IDEA_DIFF = (" There is no original to screenshot: run only the feature parity "
               "score (parity.py) against the spec, and write replica/parity.md.")
+
+# The licence and GDPR scan (core/quality) leaves out the clone's reference
+# screenshots of the original: research material, gitignored, never shipped.
+_LEGAL_SKIP = ("replica/screens",)
 
 _STEP_FINAL = ("Your final message is read out by the voice model: at most five "
                "sentences on what you did and what comes next, then, alone on the "
@@ -346,6 +350,7 @@ def _agent_system(state: dict, language: str, final: str) -> str:
         f"Grep, Glob and partial reads to opening whole files; never read "
         f"node_modules, lock files or build output; do not re-read a file you "
         f"already have; do not paste file contents into your messages.\n"
+        f"{quality.CODE_RULES}\n{quality.LEGAL_RULES}\n"
         f"{lang_line}{final}")
 
 
@@ -368,6 +373,21 @@ def _record(path: Path, key: str, rec: dict) -> dict:
     return state
 
 
+def _legal_problems(path: Path, before) -> list[str]:
+    """The licence, copyright and GDPR errors this run added to the project."""
+    return quality.new_legal_errors(path, before, _LEGAL_SKIP)
+
+
+def _legal_fix_prompt(legal: list[str], request: str) -> str:
+    return ("The assistant scanned the files you just wrote for licence, copyright and GDPR "
+            "problems and found these:\n"
+            + "\n".join(f"- {x}" for x in legal[:15])
+            + "\n\nFix exactly these, as the rules in your instructions say: replace or remove "
+              "the asset, link or code, draw your own, or record a properly licensed asset in "
+              "credits.json. Keep everything else as it is, and note what you replaced in "
+              "replica/decisions.md.\n\nFor reference, what you were asked:\n\n" + request)
+
+
 def _run_one(path: Path, state: dict, step: str, request: str, language: str,
              progress) -> dict:
     """One agent run: a pipeline step, or `request` as a free-form task."""
@@ -386,11 +406,11 @@ def _run_one(path: Path, state: dict, step: str, request: str, language: str,
             progress(f"{step} · {act}")
 
     rec = {"model": model, "at": _now()}
+    system = _agent_system(state, language, _TASK_FINAL if is_task else _STEP_FINAL)
+    before = quality.legal_baseline(path, _LEGAL_SKIP)
     try:
         res = claude.agent(prompt, model=model, cwd=path, extra_bash=_PROJECT_BASH,
-                           append_system=_agent_system(state, language,
-                                                       _TASK_FINAL if is_task else _STEP_FINAL),
-                           timeout=timeout, on_event=on_event)
+                           append_system=system, timeout=timeout, on_event=on_event)
     except claude.ClaudeError as e:
         msg = str(e)
         if "already running" in msg:
@@ -408,9 +428,27 @@ def _run_one(path: Path, state: dict, step: str, request: str, language: str,
         return rec
 
     status, remains, report = _step_status(res.text)
+    tokens, cached, minutes = res.tokens_in + res.tokens_out, res.tokens_cached, res.duration_s / 60
+    legal = _legal_problems(path, before)
+    if legal:
+        progress(f"{step} · sending back {len(legal)} licence / GDPR problem(s)")
+        try:
+            fix = claude.agent(_legal_fix_prompt(legal, prompt), model=model, cwd=path,
+                               extra_bash=_PROJECT_BASH, append_system=system,
+                               timeout=_LIGHT_TIMEOUT, on_event=on_event)
+            tokens += fix.tokens_in + fix.tokens_out
+            cached += fix.tokens_cached
+            minutes += fix.duration_s / 60
+        except claude.ClaudeError as e:
+            print(f"[Project] {step}: licence correction run failed: {e}")
+        legal = _legal_problems(path, before)
+    if legal:
+        rec["legal"] = legal[:10]
+        status = "partial"
+        remains = (f"{len(legal)} licence / GDPR problem(s) left, first: {legal[0]}"
+                   + (f" — {remains}" if remains else ""))
     rec.update(status="done" if is_task else status, remains=remains,
-               report=report[:2000], tokens=res.tokens_in + res.tokens_out,
-               cached=res.tokens_cached, minutes=round(res.duration_s / 60, 1))
+               report=report[:2000], tokens=tokens, cached=cached, minutes=round(minutes, 1))
     if is_task:
         state = _load(path) or state
         state.setdefault("tasks", []).append({"request": request[:300], **rec})

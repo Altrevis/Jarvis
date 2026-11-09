@@ -88,6 +88,7 @@ from memory.config_manager     import (
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
 )
 from core                     import gemini as _gemini
+from core                      import vision
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
@@ -406,9 +407,10 @@ TOOL_DECLARATIONS = [
     {
         "name": "screen_process",
         "description": (
-            "Captures the screen or webcam image and lets you analyze it. "
+            "Captures the screen or webcam image, or opens an image file, and lets you analyze it. "
             "MUST be called when user asks what is on screen, what you see, "
-            "look at camera, analyze my screen, etc. "
+            "look at camera, analyze my screen, etc. — and with angle 'file' when they "
+            "ask about a picture they uploaded or named (a photo, a scan, a screenshot, a diagram). "
             "You have NO visual ability without this tool. "
             "After the image is captured it is sent directly to you — describe what you see and answer the user's question. "
             "When using camera: the live view stays open until user says close it or calls close_camera."
@@ -416,7 +418,8 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "angle": {"type": "STRING", "description": "'screen' to capture display, 'camera' for webcam. Default: 'screen'"},
+                "angle": {"type": "STRING", "description": "'screen' to capture display, 'camera' for webcam, 'file' for an image file. Default: 'screen'"},
+                "path":  {"type": "STRING", "description": "angle 'file' only: full path of the image. Empty = the file the user uploaded"},
                 "text":  {"type": "STRING", "description": "The question or instruction about the captured image"}
             },
             "required": ["text"]
@@ -599,6 +602,16 @@ def _keep_context_of(exc: BaseException) -> bool:
             if _is_reconnect_signal(sub):
                 return _keep_context_of(sub)
     return True
+
+
+def _error_text(exc: BaseException) -> str:
+    """What actually went wrong. An error raised mid-conversation reaches the
+    run loop wrapped in the TaskGroup's own group, whose text — "unhandled
+    errors in a TaskGroup (1 sub-exception)" — names none of it, so a quota
+    close read that way never moved the Live ladder along."""
+    if isinstance(exc, BaseExceptionGroup):
+        return " | ".join(_error_text(sub) for sub in exc.exceptions)
+    return f"{type(exc).__name__}: {exc}"
 
 
 class JarvisLive:
@@ -1268,16 +1281,30 @@ class JarvisLive:
                 import time as _t_mod
                 _now = _t_mod.monotonic()
                 _cooldown = 4.0  # seconds — covers echo window after speaking ends
+                _file_problem = self._vision_file_problem(args)
                 if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
                     _wait = max(0, _cooldown - (_now - self._vision_last_time))
                     print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
                     result = "Vision is still processing the previous request. I will not call this again."
+                elif _file_problem:
+                    result = _file_problem
                 else:
                     self._vision_busy      = True
                     self._vision_last_time = _now
                     angle     = args.get("angle", "screen").lower()
                     user_text = args.get("text", "What do you see?")
-                    if angle == "camera":
+                    if angle == "file":
+                        # The user's own picture, shrunk to what the model reads
+                        # (core/vision.py): Live sees it, no Claude call at all.
+                        _src = self._vision_file_path(args)
+                        try:
+                            img_b, mime_t = await loop.run_in_executor(None, vision.load, _src)
+                        except ValueError:
+                            self._vision_busy = False
+                            raise
+                        print(f"[Vision] 🖼️  File {Path(_src).name}: {len(img_b):,} bytes")
+                        _stall = "image file"
+                    elif angle == "camera":
                         img_b, mime_t = await loop.run_in_executor(None, _capture_camera)
                         self.ui.start_camera_stream()
                         self._vision_cam_active = True
@@ -1530,6 +1557,26 @@ class JarvisLive:
             print(f"[JARVIS] ❌ Mic: {e}")
             raise
 
+    def _vision_file_path(self, args: dict) -> str:
+        """screen_process angle 'file': the path given, else the uploaded file."""
+        return str(args.get("path") or self.ui.current_file or "").strip()
+
+    def _vision_file_problem(self, args: dict) -> str:
+        """Why screen_process cannot open the image file it was asked for —
+        '' when it can, or when the call is not about a file at all."""
+        if str(args.get("angle", "")).lower() != "file":
+            return ""
+        src = self._vision_file_path(args)
+        if not src:
+            return ("No image file to look at: ask the user to drop it on the "
+                    "interface or to say where it is.")
+        if not vision.is_image(src):
+            return (f"'{Path(src).name}' is not an image file. file_processor "
+                    f"reads documents, ask_claude reasons about them.")
+        if not Path(src).expanduser().is_file():
+            return f"The image file '{src}' does not exist."
+        return ""
+
     async def _flush_pending_vision(self) -> bool:
         """Send a captured frame immediately after its tool response.
 
@@ -1554,8 +1601,8 @@ class JarvisLive:
         # the user's own sentence, and a screenshot of this app — which has a
         # face in the middle of it — got read as a photo of the user. What the
         # label *means* is explained once, in the generated [SELF] block.
-        src = ("[IMAGE SOURCE: WEBCAM]" if angle == "camera"
-               else "[IMAGE SOURCE: SCREEN CAPTURE]")
+        src = {"camera": "[IMAGE SOURCE: WEBCAM]",
+               "file": "[IMAGE SOURCE: IMAGE FILE]"}.get(angle, "[IMAGE SOURCE: SCREEN CAPTURE]")
         await self.session.send_client_content(
             turns={"role": "user", "parts": [
                 {"inline_data": {"mime_type": mime_t, "data": b64}},
@@ -2304,15 +2351,17 @@ class JarvisLive:
                     continue
 
                 err_str = str(e)
-                print(f"[JARVIS] Error ({type(e).__name__}): {e}")
+                cause = _error_text(e)
+                print(f"[JARVIS] Error: {cause}")
                 traceback.print_exc()
 
                 # Out of quota, or this model is not available to this key —
                 # step down the ladder and reconnect straight away. This is the
                 # difference between "JARVIS is quieter today" and "JARVIS does
                 # not start today": one model means one daily limit, and the
-                # limit always arrives mid-conversation.
-                if _gemini.note_live_failure(live_model, err_str):
+                # limit always arrives mid-conversation — so it is read from
+                # the unwrapped cause, not from the TaskGroup's wrapper.
+                if _gemini.note_live_failure(live_model, cause):
                     nxt = _gemini.live_model()
                     self.ui.write_log(
                         f"SYS: Switching to {nxt.split('/')[-1]} — the previous "

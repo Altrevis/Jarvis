@@ -19,13 +19,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core import claude, jobs
+from core import claude, jobs, vision
 from core.user_dirs import jarvis_documents_dir
 
 # Past this, an answer is something to read rather than something to hear.
 _SHOW_OVER_CHARS = 700
 # An agent task that has not finished in this long is not going to.
 _TASK_TIMEOUT = 15 * 60
+# How much of one text file goes into an answer-mode prompt.
+_MAX_FILE_CHARS = 20_000
+# Documents that are not text on disk: file_processor extracts their text.
+_BINARY_DOCS = {".pdf", ".doc", ".docx", ".odt", ".rtf", ".ppt", ".pptx", ".odp",
+                ".xls", ".xlsx", ".ods", ".zip"}
+_SKIPPED_HINT = ("file_processor reads PDF, Word, PowerPoint and Excel files, "
+                 "and the mode 'task' agent opens any file.")
 
 
 def _assistant_name() -> str:
@@ -69,6 +76,41 @@ def _dirs_for(files) -> list[str]:
         if d.exists() and str(d) not in out:
             out.append(str(d))
     return out
+
+
+def _plain_text(path: Path) -> str | None:
+    """The file's text, or None when it is not plain text. A PDF or a Word
+    file read as text is thousands of tokens of noise Claude cannot use."""
+    if path.suffix.lower() in _BINARY_DOCS:
+        return None
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(_MAX_FILE_CHARS * 4)    # a UTF-8 character is <= 4 bytes
+    except OSError:
+        return None
+    if b"\x00" in raw[:8192]:
+        return None
+    return raw.decode("utf-8", errors="replace")[:_MAX_FILE_CHARS]
+
+
+def _read_files(files) -> tuple[list[str], list[tuple[bytes, str]], list[str]]:
+    """(text blocks, images, names that could not be read). An image goes to
+    Claude as an image, shrunk to what it needs to see (core/vision.py)."""
+    texts, images, skipped = [], [], []
+    for f in files:
+        path = Path(f).expanduser()
+        if vision.is_image(path):
+            try:
+                images.append(vision.load(path))
+            except ValueError:
+                skipped.append(path.name)
+            continue
+        text = _plain_text(path)
+        if text is None:
+            skipped.append(path.name)
+        else:
+            texts.append(f"--- {f} ---\n{text}")
+    return texts, images, skipped
 
 
 def ask_claude(parameters: dict, player=None) -> str:
@@ -118,22 +160,22 @@ def ask_claude(parameters: dict, player=None) -> str:
                 "told when it is done. Say one short sentence that it has started, "
                 "then carry on with the conversation.")
 
+    texts, images, skipped = _read_files(files[:5])
+    if files and not (texts or images):
+        # Nothing Claude could use: no call, no tokens spent on noise.
+        return (f"Claude cannot read {', '.join(skipped)} as given. "
+                f"{_SKIPPED_HINT} Use that tool instead.")
     prompt = request
-    if files:
-        contents = []
-        for f in files[:5]:
-            try:
-                text = Path(f).expanduser().read_text(encoding="utf-8", errors="replace")
-                contents.append(f"--- {f} ---\n{text[:20000]}")
-            except Exception:
-                pass
-        if contents:
-            prompt += "\n\n" + "\n\n".join(contents)
+    if texts:
+        prompt += "\n\n" + "\n\n".join(texts)
     try:
         answer = claude.ask(prompt, claude.SMART, system=_answer_system(language),
-                            web=bool(p.get("web")), timeout=150 if p.get("web") else 90)
+                            images=images, web=bool(p.get("web")),
+                            timeout=150 if p.get("web") else 90)
     except claude.ClaudeError as e:
         return f"Claude could not answer: {e}"
+    if skipped:
+        answer += f"\n(Not read: {', '.join(skipped)}. {_SKIPPED_HINT})"
 
     if len(answer) > _SHOW_OVER_CHARS or "```" in answer:
         if player is not None and hasattr(player, "show_content"):
@@ -154,8 +196,9 @@ TOOL = {
         "data processing, using one of the installed skills; it runs in the "
         "background and you are told when it finishes. Not for small talk, and "
         "not when a dedicated tool exists (documents: create_document, videos: "
-        "create_motion_video, skills: manage_skills, live news: web_search, "
-        "an app or site the user is building: project)."
+        "create_motion_video, making or editing a picture: generate_image, "
+        "simply looking at a picture: screen_process, skills: manage_skills, "
+        "live news: web_search, an app or site the user is building: project)."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -167,7 +210,7 @@ TOOL = {
             "language": {"type": "STRING",
                          "description": "Language the user is speaking, e.g. 'French' — Claude writes in it"},
             "files": {"type": "ARRAY", "items": {"type": "STRING"},
-                      "description": "Full paths of files the request is about"},
+                      "description": "Full paths of files the request is about: text files, code, and images (Claude sees the picture)"},
             "web": {"type": "BOOLEAN",
                     "description": "answer mode only: let Claude search the web first (adds ~20 s)"},
         },

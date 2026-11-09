@@ -1,7 +1,12 @@
 # Skill packs
 
 Claude skills that ship with the app but are **not** installed in
-`workspace/.claude/skills/`. Every `ask_claude` task lists every skill it can
+`workspace/.claude/skills/`. A pack is a method for **another project** — a
+product, a project file, an estimate — never for changing Jarvis itself
+(that is a mission targeting this repository; see `skill_spaces/README.md`,
+"Two purposes"). A pack can still be pointed at Jarvis as its subject: the
+Scrum file or the chiffrage of the Jarvis project are documents about it, not
+changes to its code. Every `ask_claude` task lists every skill it can
 see there, so a pack only one feature uses would be paid for, in tokens, on
 every task that never touches it. A pack here is copied into the folder of the
 thing that needs it instead.

@@ -34,13 +34,22 @@ WHY IT SPENDS LITTLE
       request allows, and never more than "agents_max_tasks" (5).
     - A specialist starts fresh and reads the few handoffs it depends on —
       kilobytes — instead of a transcript replayed on every turn.
-    - It sees the skills of its own domain only: sixteen spaces of skill
+    - It sees the skills of its own domain only: every space's skill
       descriptions would otherwise be read on every one of its turns.
     - Specialists and the reviewer run on Sonnet unless the space or the
       config says otherwise ("agents_models", "agents_model",
       "agents_review_model"); only the plan uses the smart tier.
     - Checking is the assistant's, for free. Correction runs are short, are
-      handed the exact problems, and happen once.
+      handed the exact problems, and happen once. The checks are the
+      handoff, the promised deliverables and core/quality's licence and GDPR
+      scan of the work folder and the targets, before and after the task:
+      only what the task added is sent back.
+
+TWO KINDS OF MISSION
+    A mission either improves Jarvis (a target is this repository) or works on
+    another project (the work folder, the user's project as a target). Every
+    agent is told which, per folder (core/quality.describe); a specialist
+    working on Jarvis also gets core/quality.SELF_RULES.
     - A mission with a single task is not reviewed unless asked.
 
 CONCURRENCY
@@ -64,11 +73,12 @@ import tempfile
 import threading
 import time
 import unicodedata
+from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Callable
 
-from core import claude, spaces
+from core import claude, quality, spaces
 from core.user_dirs import jarvis_documents_dir
 
 _STATE = Path(".jarvis") / "mission.json"
@@ -358,7 +368,7 @@ def _plan_prompt(state: dict, known: list, limit: int) -> str:
     targets = state.get("targets") or []
     lang = state.get("language") or "the language of the request"
     tgt = ("\n\nTarget folders the team works on (the user's own files):\n"
-           + "\n".join(f"- {t}" for t in targets)) if targets else ""
+           + "\n".join(f"- {quality.describe(t)}" for t in targets)) if targets else ""
     return (
         f"Request from the user:\n{state['request']}{tgt}\n\n"
         f"Specialists available (id: what they cover):\n{listing}\n\n"
@@ -621,7 +631,9 @@ def _task_prompt(path: Path, state: dict, task: dict, space) -> str:
     if state.get("targets"):
         out += ["", "Target folders — the user's own files; change them only as your "
                     "task requires:"]
-        out += [f"- {t}" for t in state["targets"]]
+        out += [f"- {quality.describe(t)}" for t in state["targets"]]
+        if any(quality.is_jarvis(t) for t in state["targets"]):
+            out += ["", quality.SELF_RULES]
     # Only a run of THIS task writes its handoff or deliverables, and a task that
     # is done never runs again: finding them means an earlier run got that far.
     prev = recs.get(tid) or {}
@@ -671,6 +683,8 @@ def _specialist_system(state: dict, space) -> str:
         f"skip a check.\n"
         f"Write text meant for the user in {_lang(state)}. Code, identifiers and commit "
         f"messages: English.\n"
+        f"{quality.CODE_RULES}\n"
+        f"{quality.LEGAL_RULES}\n"
         f"Your final message is read by the assistant: at most five sentences on what you "
         f"did, then, alone on the last line, `STEP: done` when your task is complete or "
         f"`STEP: partial — <what remains>` when it is not."
@@ -697,6 +711,23 @@ def _problems(path: Path, task: dict) -> list[tuple[str, Path]]:
             empty = True
         if empty:
             out.append(("deliverable", f))
+    return out
+
+
+def _legal_baselines(path: Path, state: dict) -> dict[Path, Counter]:
+    """What the licence and GDPR scan finds, before the task runs, in every
+    folder it may write in: the shared work folder and the targets — Jarvis
+    itself or the user's project."""
+    folders = [_paths(path)[0]] + [Path(t) for t in state.get("targets") or () if Path(t).is_dir()]
+    return {f: quality.legal_baseline(f) for f in folders}
+
+
+def _legal_problems(baselines: dict[Path, Counter]) -> list[str]:
+    """The licence, copyright and GDPR errors the task added — not what the
+    user or earlier tasks left there."""
+    out = []
+    for folder, before in baselines.items():
+        out += [f"in {folder}: {x}" for x in quality.new_legal_errors(folder, before)]
     return out
 
 
@@ -775,6 +806,7 @@ def run_task(path: Path, task: dict, cancel: threading.Event,
     spaces.install_into(space, run_dir / ".claude" / "skills")
     work = _paths(path)[0]
     before = _snapshot(work)
+    baselines = _legal_baselines(path, state)
     append = _specialist_system(state, space)
     label = f"{tid} {space.id}"
     progress(f"{label} · started ({model})")
@@ -796,12 +828,17 @@ def run_task(path: Path, task: dict, cancel: threading.Event,
         denials(res)
         status, remains, report = _step_status(res.text)
         problems = _problems(path, task)
-        if problems and not cancel.is_set():
-            progress(f"{label} · sending back {len(problems)} problem(s)")
+        legal = _legal_problems(baselines)
+        if (problems or legal) and not cancel.is_set():
+            progress(f"{label} · sending back {len(problems) + len(legal)} problem(s)")
+            found = [_problem_text(k, f) for k, f in problems]
+            found += [f"licence / GDPR scan, {x}" for x in legal[:15]]
             fix = ("The assistant checked your task and found these problems:\n"
-                   + "\n".join(f"- {_problem_text(k, f)}" for k, f in problems)
-                   + "\n\nFix exactly these: write what is missing, then make sure your "
-                     "handoff is complete. Keep everything else as it is.\n\n"
+                   + "\n".join(f"- {x}" for x in found)
+                   + "\n\nFix exactly these: write what is missing; for a licence or GDPR "
+                     "finding, replace or remove the asset, link or code, or record a "
+                     "licensed asset in credits.json, as your rules say. Then make sure "
+                     "your handoff is complete. Keep everything else as it is.\n\n"
                      "For reference, your task was:\n\n"
                    + _task_prompt(path, load(path) or state, task, space))
             try:
@@ -820,6 +857,7 @@ def run_task(path: Path, task: dict, cancel: threading.Event,
             except claude.ClaudeError as e:
                 print(f"[Agents] {label}: correction run failed: {e}")
             problems = _problems(path, task)
+            legal = _legal_problems(baselines)
         if any(k == "handoff" for k, _f in problems):
             _fallback_handoff(path, task, report)
             rec["handoff"] = "assistant"
@@ -828,6 +866,13 @@ def run_task(path: Path, task: dict, cancel: threading.Event,
             status = PARTIAL
             missing = ", ".join(f.name for _k, f in problems)
             remains = f"missing: {missing}" + (f" — {remains}" if remains else "")
+        if legal:
+            status = PARTIAL
+            rec["legal"] = legal[:10]
+            remains = (f"{len(legal)} licence / GDPR problem(s) left, first: {legal[0]}"
+                       + (f" — {remains}" if remains else ""))
+        else:
+            rec.pop("legal", None)                 # a task run again may have fixed them
         rec.update(status=DONE if status == DONE else PARTIAL, remains=remains,
                    report=report[:2500])
     except claude.ClaudeCancelled:
@@ -883,7 +928,7 @@ def _review_prompt(path: Path, state: dict) -> str:
             out.append(f"   not done: {rec['remains']}")
     if state.get("targets"):
         out += ["", "Target folders (the user's files the team worked on):"]
-        out += [f"- {t}" for t in state["targets"]]
+        out += [f"- {quality.describe(t)}" for t in state["targets"]]
     ex = json.dumps({"tasks": {"T1": {"ok": True, "issues": []},
                                "T2": {"ok": False, "issues": ["<file — what is wrong — what is expected>"]}},
                      "summary": "<two sentences>"}, ensure_ascii=False)
