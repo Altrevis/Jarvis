@@ -84,4 +84,10 @@ The agents must never do the arithmetic themselves.
 The skills call it as `.claude/chiffrage-kit/chiffrage.py`, like the Scrum
 pack's renderer: whatever installs the pack copies the skills to
 `<workspace>/.claude/skills/` and `chiffrage.py` to
-`<workspace>/.claude/chiffrage-kit/`. No action installs it yet.
+`<workspace>/.claude/chiffrage-kit/`.
+
+Used by `actions/chiffrage.py` (no voice tool of its own), which installs it
+in the project's Scrum workspace, runs one step per agent, checks each with
+the reviewed copy here and sends the errors back to a correction run, like the
+Scrum pack. Today only the Direction Projet run (`actions/direction.py`)
+starts it.

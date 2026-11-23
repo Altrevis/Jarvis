@@ -673,6 +673,24 @@ def _docx(path: Path, state: dict, blocks: list[dict]) -> Path:
     return out
 
 
+def _cdc_files(path: Path, state: dict, progress) -> tuple[Path, Path | None]:
+    """The specification printed, here and now: the PDF (portrait, numbered
+    pages) and the Word file, or None for Word when it could not be made.
+    Shared by the export below and by actions/direction.py."""
+    progress("printing the specification")
+    blocks = _cdc_blocks(path)
+    cover = next((b for b in blocks if b["t"] == "cover"), {})
+    pdf = _pdf(path, state, "cahier-des-charges.html", "cahier-des-charges",
+               footer=f"{cover.get('title', '')} — {cover.get('project', '')} — v{cover.get('version', '')}")
+    progress("writing the Word file")
+    try:
+        docx = _docx(path, state, blocks)
+    except Exception as e:
+        print(f"[Scrum] Word export failed: {e}")
+        docx = None
+    return pdf, docx
+
+
 def _export_cdc(player, path: Path, state: dict, word: bool) -> str:
     """The specification as a PDF (portrait, numbered pages) and a Word file."""
     if not (path / "scrum" / "cahier-des-charges.json").is_file():
@@ -680,17 +698,7 @@ def _export_cdc(player, path: Path, state: dict, word: bool) -> str:
                 f"cahier-des-charges step.")
 
     def work(progress) -> str:
-        progress("printing the specification")
-        blocks = _cdc_blocks(path)
-        cover = next((b for b in blocks if b["t"] == "cover"), {})
-        pdf = _pdf(path, state, "cahier-des-charges.html", "cahier-des-charges",
-                   footer=f"{cover.get('title', '')} — {cover.get('project', '')} — v{cover.get('version', '')}")
-        progress("writing the Word file")
-        try:
-            docx = _docx(path, state, blocks)
-        except Exception as e:
-            print(f"[Scrum] Word export failed: {e}")
-            docx = None
+        pdf, docx = _cdc_files(path, state, progress)
         shown = docx if word and docx else pdf
         _open_file(shown)
         made = f"{pdf}" + (f" and {docx} (Word, editable)" if docx else " (the Word file could not be made)")

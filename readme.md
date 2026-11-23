@@ -389,6 +389,21 @@ Sources can be handed in at creation (`sources`: a brief, a cahier des charges i
 
 ---
 
+## ◈ Direction Projet — one brief, the whole project
+
+The **◈ DIRECTION PROJET** button in the header swaps the HUD for a page of its own (the activity log stays on the right). Describe the project once — as a **free prompt**, or through a **12-question questionnaire** (type, need, users, must-haves, later, setting, team, deadline, budget, imposed stack, personal data, notes) — tick the phases, and one background job chains them:
+
+| Phase | What runs | Where it lands |
+|---|---|---|
+| Dossier Scrum & cahier des charges | the 8 Scrum steps, then the cahier des charges printed to PDF and Word | `Documents/JARVIS/scrum/<name>/` |
+| Chiffrage | WBS → estimation → budget → TCO → pitch (`skill_packs/chiffrage/`), built on the backlog, every figure computed by `chiffrage.py` | same workspace, `livrables/chiffrage.md` |
+| Code | the Replica pipeline for an original idea, `spec` → `diff`, started from the cahier des charges, the backlog and the estimate copied into `docs/` | `Documents/JARVIS/projects/<name>/` |
+| Présentation | the defence deck (PowerPoint + web) built on the pitch and the figures — only once the other ticked phases are complete | `Documents/JARVIS/documents/` |
+
+The questionnaire becomes the brief locally, with no model call. Each step is the same one the `scrum` and `project` tools run, with the same checks, so a project started here can be continued by voice and the other way round. The page shows how many agent runs each phase costs and on which model, follows every step live, and opens each output. **Nothing is done twice:** launching again on the same name resumes where it stopped — after the STOP button (it ends after the step in progress), Claude's usage limit, or a step left partial that the next ones build on. The brief is kept in `Documents/JARVIS/direction/<name>/brief.md`. Override the chiffrage model with `chiffrage_model` / `chiffrage_models`.
+
+---
+
 ## 🤖 Agents — a team of IT specialists
 
 *"Monte une équipe d'agents pour sécuriser et dockeriser mon API Flask"* — *"Demande à l'agent réseau un plan d'adressage pour trois VLAN"* — *"Propose-moi d'abord le plan"* — *"Où en est la mission ?"* — *"Arrête les agents"*
@@ -486,11 +501,14 @@ Mark LV/
 │   ├── video_player.py       # Plays video on the HUD, where the avatar normally is
 │   ├── project.py            # Software projects, one folder each, built step by step with Replica
 │   ├── scrum.py              # Scrum deliverables, one workspace each, drawn locally
+│   ├── chiffrage.py          # Runs the chiffrage pack in a Scrum workspace (no voice tool)
+│   ├── direction.py          # Direction Projet: Scrum → chiffrage → code → deck in one job
 │   ├── agents.py             # The agent team, by voice: missions, delegation, status
 │   └── desktop.py            # Desktop and taskbar control
 ├── skill_packs/
 │   ├── replica/              # Replica skills (MIT), copied into each project — not loaded globally
-│   └── scrum/                # Scrum skills + render.py, copied into each workspace
+│   ├── scrum/                # Scrum skills + render.py, copied into each workspace
+│   └── chiffrage/            # Estimate & costing skills + chiffrage.py, copied the same way
 ├── skill_spaces/             # One folder of skills per IT domain, one specialist agent each
 │   └── <domain>/SPACE.md     #   the specialist's role, routing words, model, shell presets
 ├── memory/

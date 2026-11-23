@@ -50,7 +50,8 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
     print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
 
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QGridLayout,
+    QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QGraphicsScene, QGraphicsView,
     QStackedWidget, QTextEdit, QVBoxLayout, QWidget, QProgressBar,
@@ -3305,6 +3306,495 @@ class RemoteKeyOverlay(QWidget):
         self.closed.emit()
 
 
+class DirectionPage(QWidget):
+    """« Direction Projet »: describe a project once, Jarvis makes the whole file.
+
+    It takes the centre of the window while it is on — the header button of
+    MainWindow switches between it and the HUD, and the activity log stays on
+    the right. The work itself is actions/direction.py, one background job, so
+    the page can be left and opened again at any time: it only reads that
+    run's state files, every second and a half while it is on screen.
+
+    Two ways to describe the project: a free prompt, or a questionnaire whose
+    answers actions/direction.py turns into the same brief, with no model call."""
+
+    back = pyqtSignal()
+
+    _TYPES = ("Application web", "Site vitrine", "E-commerce", "Application mobile",
+              "API / back-end", "Logiciel desktop", "Outil interne", "Autre")
+    _CADRES = ("Projet école", "Client / freelance", "Startup / produit",
+               "Interne entreprise", "Personnel")
+    _DONNEES = ("Oui", "Non", "Je ne sais pas")
+    _OUTPUTS = (("dossier", "DOSSIER SCRUM"), ("cdc", "CAHIER DES CHARGES"),
+                ("chiffrage", "CHIFFRAGE"), ("code", "CODE"), ("deck", "PRÉSENTATION"),
+                ("folder", "📁  DOSSIER"))
+
+    def __init__(self, player=None, parent=None):
+        super().__init__(parent)
+        from actions import direction          # already loaded at boot, with the other actions
+        self._api = direction
+        self.player = player                   # the JarvisUI: the job reports through it
+        self._mode = "libre"
+        self._stop_sent = False
+        self.setObjectName("DirectionPage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"QWidget#DirectionPage {{ background: {C.BG}; }}")
+
+        # Built here, not at class level: the saved accent colour is applied
+        # to C when the window starts, after this module is imported.
+        self._field_css = f"""
+            QLineEdit, QTextEdit {{ background: {C.DARK}; color: {C.TEXT};
+                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px; }}
+            QLineEdit:focus, QTextEdit:focus {{ border: 1px solid {C.PRI}; }}
+        """
+        self._primary_css = f"""
+            QPushButton {{ background: {C.PRI_GHO}; color: {C.PRI};
+                border: 1px solid {C.PRI}; border-radius: 3px; }}
+            QPushButton:hover {{ background: {C.PRI}; color: {C.BG}; }}
+            QPushButton:disabled {{ background: transparent; color: {C.TEXT_DIM};
+                border-color: {C.BORDER}; }}
+        """
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self._build_top())
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{ background: {C.BG}; width: 6px; border: none; }}
+            QScrollBar::handle:vertical {{ background: {C.BORDER_B}; border-radius: 3px;
+                min-height: 16px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; border: none; }}
+        """)
+        body = QWidget()
+        body.setObjectName("DirectionBody")
+        body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        body.setStyleSheet(f"QWidget#DirectionBody {{ background: {C.BG}; }}")
+        self._lay = QVBoxLayout(body)
+        self._lay.setContentsMargins(18, 12, 18, 18)
+        self._lay.setSpacing(6)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, stretch=1)
+
+        self._build_project()
+        self._build_brief()
+        self._build_phases()
+        self._build_follow()
+        self._lay.addStretch()
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(1500)
+        self._timer.timeout.connect(self._refresh)
+        self._name.textChanged.connect(self._refresh)
+        self._pick_mode("libre")
+
+    # ── Small builders ──
+    def _text(self, text: str, size: int = 8, color: str = "", bold: bool = False,
+              wrap: bool = True) -> QLabel:
+        w = QLabel(text)
+        w.setWordWrap(wrap)
+        w.setFont(QFont("Courier New", size, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+        w.setStyleSheet(f"color: {color or C.TEXT_MED}; background: transparent;")
+        return w
+
+    def _section(self, text: str, lay=None) -> None:
+        lbl = QLabel(f"▸ {text}")
+        lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent; "
+                          f"border-bottom: 1px solid {C.BORDER}; padding: 8px 0 3px 0;")
+        # `is None`, not `or`: an empty QLayout has len() 0 and is falsy.
+        (self._lay if lay is None else lay).addWidget(lbl)
+
+    def _line(self, placeholder: str) -> QLineEdit:
+        w = QLineEdit()
+        w.setPlaceholderText(placeholder)
+        w.setFont(QFont("Courier New", 9))
+        w.setFixedHeight(30)
+        w.setStyleSheet(self._field_css)
+        return w
+
+    def _area(self, placeholder: str, lines: int = 3) -> QTextEdit:
+        w = QTextEdit()
+        w.setAcceptRichText(False)
+        w.setPlaceholderText(placeholder)
+        w.setFont(QFont("Courier New", 9))
+        w.setFixedHeight(17 * lines + 16)
+        w.setStyleSheet(self._field_css)
+        return w
+
+    def _chip(self, text: str, left: bool = False) -> QPushButton:
+        """A checkable button: a choice in the questionnaire, a phase, a mode."""
+        b = QPushButton(text)
+        b.setCheckable(True)
+        b.setFixedHeight(26)
+        b.setFont(QFont("Courier New", 8))
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 0 8px;
+                {'text-align: left;' if left else ''} }}
+            QPushButton:hover {{ color: {C.PRI}; border-color: {C.BORDER_B}; }}
+            QPushButton:checked {{ background: {C.PRI_GHO}; color: {C.PRI}; border-color: {C.PRI}; }}
+        """)
+        return b
+
+    def _chips(self, options, columns: int = 4) -> tuple[QWidget, QButtonGroup]:
+        """One choice among `options`, laid out in a grid."""
+        box = QWidget()
+        grid = QGridLayout(box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(5)
+        group = QButtonGroup(box)
+        for i, option in enumerate(options):
+            b = self._chip(option)
+            group.addButton(b)
+            grid.addWidget(b, i // columns, i % columns)
+        return box, group
+
+    # ── The page ──
+    def _build_top(self) -> QWidget:
+        w = QWidget()
+        w.setObjectName("DirectionTop")
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        w.setStyleSheet(f"QWidget#DirectionTop {{ background: {C.DARK}; "
+                        f"border-bottom: 1px solid {C.BORDER}; }}")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(16, 8, 12, 8)
+        lay.addWidget(self._text("◈  DIRECTION PROJET", 11, C.PRI, bold=True, wrap=False))
+        lay.addStretch()
+        back = QPushButton("✕  RETOUR AU HUD")
+        back.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        back.setCursor(Qt.CursorShape.PointingHandCursor)
+        back.setStyleSheet(f"""
+            QPushButton {{ color: {C.TEXT_DIM}; background: transparent; border: none;
+                padding: 2px 6px; }}
+            QPushButton:hover {{ color: {C.PRI}; }}
+        """)
+        back.clicked.connect(self.back.emit)
+        lay.addWidget(back)
+        return w
+
+    def _build_project(self) -> None:
+        self._lay.addWidget(self._text(
+            "Décris le projet une fois : Jarvis enchaîne le dossier Scrum et le cahier des "
+            "charges, le chiffrage, le code puis la présentation, chaque étape construite "
+            "sur la précédente."))
+        self._section("PROJET")
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self._name = self._line("Nom du projet (ex. Gestion d'association)")
+        row.addWidget(self._name, stretch=1)
+        self._lang = QButtonGroup(self)
+        for language, text in (("French", "FR"), ("English", "EN")):
+            b = self._chip(text)
+            b.setFixedSize(44, 30)
+            b.setToolTip(f"Langue des livrables : {'français' if text == 'FR' else 'anglais'}")
+            b.setProperty("language", language)
+            b.setChecked(language == "French")
+            self._lang.addButton(b)
+            row.addWidget(b)
+        self._lay.addLayout(row)
+        self._hint = self._text("", 7, C.ACC2)
+        self._hint.hide()
+        self._lay.addWidget(self._hint)
+
+    def _build_brief(self) -> None:
+        self._section("LE PROJET")
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self._mode_btns: dict[str, QPushButton] = {}
+        for key, text in (("libre", "✎  PROMPT LIBRE"), ("questionnaire", "☰  QUESTIONNAIRE")):
+            b = self._chip(text)
+            b.setFixedHeight(30)
+            b.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+            b.clicked.connect(lambda _=False, k=key: self._pick_mode(k))
+            row.addWidget(b)
+            self._mode_btns[key] = b
+        self._lay.addLayout(row)
+
+        # The example goes in a note under the box: a QTextEdit placeholder is
+        # drawn on one line and cut at the edge.
+        self._free = QWidget()
+        free = QVBoxLayout(self._free)
+        free.setContentsMargins(0, 0, 0, 0)
+        free.setSpacing(4)
+        self._prompt = self._area("Ce que tu veux faire, pour qui, avec quelles contraintes…",
+                                  lines=9)
+        free.addWidget(self._prompt)
+        free.addWidget(self._text(
+            "Ex. : une application web pour qu'une association de quartier gère ses "
+            "adhérents, ses événements et ses cotisations — paiement en ligne, espace "
+            "membre, tableau de bord pour le bureau. Projet école Ynov, 4 développeurs, "
+            "3 mois.", 7, C.TEXT_DIM))
+        self._lay.addWidget(self._free)
+        self._form = self._build_form()
+        self._lay.addWidget(self._form)
+
+    def _build_form(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.setSpacing(4)
+
+        def ask(question: str, field: QWidget, note: str = "") -> None:
+            lay.addWidget(self._text(question, 8, C.TEXT, bold=True))
+            if note:
+                lay.addWidget(self._text(note, 7, C.TEXT_DIM))
+            lay.addWidget(field)
+            lay.addSpacing(4)
+
+        box, self._q_type = self._chips(self._TYPES)
+        ask("1. Quel type de projet ?", box)
+        self._q_besoin = self._area("Le problème, aujourd'hui, et ce qui doit changer")
+        ask("2. Quel problème résout-il ?  (obligatoire)", self._q_besoin,
+            "Ex. : les inscriptions se font sur papier et le bureau passe ses soirées à "
+            "relancer les cotisations.")
+        self._q_cible = self._line("Ex. : les 200 adhérents et les 5 membres du bureau")
+        ask("3. Pour qui ?", self._q_cible)
+        self._q_must = self._area("Une par ligne", lines=4)
+        ask("4. Les fonctionnalités indispensables", self._q_must,
+            "Le minimum pour que le projet serve déjà. Ex. : inscription en ligne · paiement "
+            "de la cotisation · agenda des événements.")
+        self._q_later = self._area("Une par ligne", lines=2)
+        ask("5. Plus tard, ou hors périmètre", self._q_later,
+            "Ce qui attendra une version suivante.")
+        box, self._q_cadre = self._chips(self._CADRES, columns=3)
+        ask("6. Dans quel cadre ?", box)
+        self._q_team = self._line("Ex. : 1 PO, 1 Scrum Master, 4 développeurs — vide : équipe type")
+        ask("7. Qui réalise ?", self._q_team)
+        self._q_delai = self._line("Ex. : 3 mois, livraison le 15/03/2027")
+        ask("8. Quel délai ?", self._q_delai)
+        self._q_budget = self._line("Ex. : 40 000 € HT, ou TJM 450 € — vide : Jarvis estime")
+        ask("9. Quel budget ?", self._q_budget)
+        self._q_tech = self._line("Ex. : React + Node.js, PostgreSQL — vide : Jarvis choisit")
+        ask("10. Une technique imposée ?", self._q_tech)
+        box, self._q_data = self._chips(self._DONNEES, columns=3)
+        ask("11. Des données personnelles ?", box,
+            "Comptes, adresses, paiements… : le RGPD entre alors dans le cahier des charges.")
+        self._q_notes = self._area("Concurrents, inspirations, contraintes particulières…", lines=2)
+        ask("12. Autre chose à savoir ?", self._q_notes)
+        return w
+
+    def _build_phases(self) -> None:
+        self._section("CE QUE JARVIS PRODUIT")
+        self._phase_btns: dict[str, QPushButton] = {}
+        for ph in self._api.plan():
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            b = self._chip("", left=True)
+            label = ph["label"].replace("&", "&&")     # a lone & is a Qt mnemonic
+            b.toggled.connect(lambda on, b=b, t=label: b.setText(f"{'☑' if on else '☐'}  {t}"))
+            b.setChecked(True)
+            row.addWidget(b, stretch=1)
+            runs = ph["runs"]
+            cost = self._text(f"{runs} agent{'s' if runs > 1 else ''} · {ph['models']}",
+                              7, C.TEXT_DIM, wrap=False)
+            cost.setFixedWidth(190)                    # one column: the phases line up
+            row.addWidget(cost)
+            self._lay.addLayout(row)
+            self._phase_btns[ph["key"]] = b
+        self._lay.addWidget(self._text(
+            "Le code est la phase la plus longue (jusqu'à 40 minutes par étape lourde). "
+            "Une étape déjà faite n'est jamais refaite : si Claude atteint sa limite ou si tu "
+            "arrêtes, relancer reprend là où ça s'est arrêté.", 7, C.TEXT_DIM))
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self._go = QPushButton("▸  LANCER LA CONCEPTION")
+        self._go.setFixedHeight(34)
+        self._go.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._go.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._go.setStyleSheet(self._primary_css)
+        self._go.clicked.connect(self._launch)
+        row.addWidget(self._go, stretch=2)
+        self._stop = QPushButton("■  ARRÊTER")
+        self._stop.setFixedHeight(34)
+        self._stop.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._stop.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop.setToolTip("Termine l'étape en cours, puis s'arrête")
+        self._stop.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.ACC};
+                border: 1px solid {C.ACC}; border-radius: 3px; }}
+            QPushButton:hover {{ background: rgba(255,107,0,40); }}
+            QPushButton:disabled {{ color: {C.TEXT_DIM}; border-color: {C.BORDER}; }}
+        """)
+        self._stop.clicked.connect(self._ask_stop)
+        self._stop.setEnabled(False)
+        row.addWidget(self._stop, stretch=1)
+        self._lay.addLayout(row)
+        self._msg = self._text("", 8)
+        self._msg.hide()
+        self._lay.addWidget(self._msg)
+
+    def _build_follow(self) -> None:
+        self._follow_box = QWidget()
+        lay = QVBoxLayout(self._follow_box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(5)
+        self._section("SUIVI", lay)
+        self._status_lbl = self._text("", 8, C.TEXT, bold=True)
+        lay.addWidget(self._status_lbl)
+        self._track = QLabel()
+        self._track.setTextFormat(Qt.TextFormat.RichText)
+        self._track.setWordWrap(True)
+        self._track.setFont(QFont("Courier New", 8))
+        self._track.setStyleSheet("background: transparent;")
+        lay.addWidget(self._track)
+
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        self._out_btns: dict[str, QPushButton] = {}
+        for i, (key, text) in enumerate(self._OUTPUTS):
+            b = QPushButton(f"⤢  {text}" if key != "folder" else text)
+            b.setFixedHeight(26)
+            b.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(f"""
+                QPushButton {{ background: transparent; color: {C.TEXT_MED};
+                    border: 1px solid {C.BORDER_B}; border-radius: 3px; }}
+                QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI}; }}
+                QPushButton:disabled {{ color: {C.BORDER_B}; border-color: {C.BORDER}; }}
+            """)
+            b.clicked.connect(lambda _=False, k=key: self._open(k))
+            grid.addWidget(b, i // 3, i % 3)
+            self._out_btns[key] = b
+        lay.addLayout(grid)
+        self._follow_box.hide()
+        self._lay.addWidget(self._follow_box)
+
+    # ── Behaviour ──
+    def _pick_mode(self, mode: str) -> None:
+        self._mode = mode
+        for key, b in self._mode_btns.items():
+            b.setChecked(key == mode)
+        self._free.setVisible(mode == "libre")
+        self._form.setVisible(mode == "questionnaire")
+
+    @staticmethod
+    def _picked(group: QButtonGroup) -> str:
+        b = group.checkedButton()
+        return b.text() if b else ""
+
+    def _answers(self) -> dict:
+        return {
+            "type": self._picked(self._q_type), "besoin": self._q_besoin.toPlainText(),
+            "cible": self._q_cible.text(), "indispensable": self._q_must.toPlainText(),
+            "plus_tard": self._q_later.toPlainText(), "cadre": self._picked(self._q_cadre),
+            "equipe": self._q_team.text(), "delai": self._q_delai.text(),
+            "budget": self._q_budget.text(), "technique": self._q_tech.text(),
+            "donnees": self._picked(self._q_data), "remarques": self._q_notes.toPlainText(),
+        }
+
+    def _say(self, text: str, ok: bool = True) -> None:
+        self._msg.setText(text)
+        self._msg.setStyleSheet(f"color: {C.GREEN if ok else C.RED}; background: transparent;")
+        self._msg.setVisible(bool(text))
+
+    def _launch(self) -> None:
+        lang = self._lang.checkedButton()
+        form = {"name": self._name.text(), "mode": self._mode,
+                "language": lang.property("language") if lang else "French",
+                "phases": [k for k, b in self._phase_btns.items() if b.isChecked()]}
+        if self._mode == "libre":
+            form["prompt"] = self._prompt.toPlainText()
+        else:
+            form["answers"] = self._answers()
+        try:
+            ok, msg = self._api.launch(form, player=self.player)
+        except Exception as e:                  # noqa: BLE001 — shown, never fatal
+            ok, msg = False, f"Impossible de lancer : {e}"
+        self._say(msg, ok)
+        self._stop_sent = False
+        self._refresh()
+
+    def _ask_stop(self) -> None:
+        if self._api.request_stop(self._name.text()):
+            self._stop_sent = True
+            self._say("Arrêt demandé : l'étape en cours se termine d'abord.", True)
+        self._refresh()
+
+    def _open(self, kind: str) -> None:
+        why = self._api.open_output(self._name.text(), kind)
+        if why:
+            self._say(why, False)
+
+    def _refresh(self) -> None:
+        name = self._name.text().strip()
+        try:
+            info = self._api.follow(name) if name else {"exists": False}
+            seen = self._api.lookup(name) if name else {}
+        except Exception as e:                  # noqa: BLE001 — a bad state file, not a crash
+            print(f"[Direction] {e}")
+            return
+        running = bool(info.get("running"))
+        if not running:
+            self._stop_sent = False
+        if info.get("exists"):
+            hint = ("Ce projet existe : relancer reprend là où il s'est arrêté, sans rien "
+                    "refaire. Laisse le brief vide pour garder celui enregistré.")
+        else:
+            found = [what for what, key in (("un dossier Scrum", "scrum"),
+                                            ("un projet de code", "project")) if seen.get(key)]
+            hint = (f"Il existe déjà {' et '.join(found)} à ce nom : Jarvis le reprend au lieu "
+                    f"d'en créer un autre." if found else "")
+        self._hint.setText(hint)
+        self._hint.setVisible(bool(hint))
+        self._go.setText("▸  REPRENDRE" if info.get("exists") else "▸  LANCER LA CONCEPTION")
+        self._go.setEnabled(not running)
+        self._stop.setEnabled(running and not self._stop_sent)
+        self._follow_box.setVisible(bool(info.get("exists")))
+        if info.get("exists"):
+            self._paint_follow(info)
+
+    def _paint_follow(self, info: dict) -> None:
+        from html import escape
+        status = info.get("status", "")
+        title, colour = {
+            "running": ("⟳  EN COURS", C.PRI), "done": ("✓  TERMINÉ", C.GREEN),
+            "partial": ("~  TERMINÉ, AVEC DES ÉTAPES PARTIELLES", C.ACC2),
+            "stopped": ("■  ARRÊTÉ", C.ACC), "failed": ("✕  ÉCHEC", C.RED),
+        }.get(status, ("", C.TEXT_MED))
+        if status == "running" and info.get("current"):
+            title += f" — {info['current']}"
+        elif info.get("note"):
+            title += f" — {info['note']}"
+        self._status_lbl.setText(title)
+        self._status_lbl.setStyleSheet(f"color: {colour}; background: transparent;")
+
+        colours = {"done": C.GREEN, "partial": C.ACC2, "failed": C.RED, "running": C.PRI}
+        marks = {"done": "✓", "partial": "~", "failed": "✕", "running": "⟳"}
+        blocks = []
+        for ph in info.get("phases") or ():
+            if not ph["on"] and not ph["done"]:
+                continue
+            steps = "&nbsp;&nbsp; ".join(
+                f"<span style='color:{colours.get(st, C.TEXT_DIM)}'>"
+                f"{marks.get(st, '·')}&nbsp;{escape(step)}</span>"
+                for step, st in ph["steps"])
+            note = (f"<br><span style='color:{C.TEXT_DIM}'>{escape(ph['note'])}</span>"
+                    if ph["note"] else "")
+            blocks.append(f"<p style='margin:4px 0'><b style='color:{C.TEXT}'>"
+                          f"{escape(ph['label'])}</b> <span style='color:{C.TEXT_DIM}'>"
+                          f"{ph['done']}/{len(ph['steps'])}</span><br>{steps}{note}</p>")
+        self._track.setText("".join(blocks))
+        found = info.get("outputs") or {}
+        for key, b in self._out_btns.items():
+            b.setEnabled(key in found)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._refresh()
+        self._timer.start()
+
+    def hideEvent(self, e):
+        self._timer.stop()
+        super().hideEvent(e)
+
+
 class MainWindow(QMainWindow):
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
@@ -3368,6 +3858,8 @@ class MainWindow(QMainWindow):
         self.ptt_hold          = None   # callable: (held: bool) -> None — windowed chord
         self.wake_get_state    = None   # callable: () -> dict {enabled, awake, ready}
         self._muted            = False
+        self.player            = None   # the JarvisUI wrapping this window, set by it
+        self._direction_page: DirectionPage | None = None   # built on first use
         self._current_file: str | None = None
         self._remote_overlay: RemoteKeyOverlay | None = None
         self._customize_overlay: CustomizeOverlay | None = None
@@ -3609,7 +4101,12 @@ class MainWindow(QMainWindow):
         self._center_split.setStretchFactor(0, 3)
         self._center_split.setStretchFactor(1, 1)
         self._center_split.setCollapsible(0, False)
-        body.addWidget(self._center_split, stretch=5)
+
+        # Stack: 0 = the HUD column above, 1 = the Direction Projet page,
+        # added the first time the header button opens it.
+        self._mode_stack = QStackedWidget()
+        self._mode_stack.addWidget(self._center_split)
+        body.addWidget(self._mode_stack, stretch=5)
 
         self._right_panel = self._build_right_panel()
         body.addWidget(self._right_panel, stretch=0)
@@ -4435,6 +4932,26 @@ class MainWindow(QMainWindow):
         self._ctrl_btn.clicked.connect(self._toggle_controls)
         lay.addSpacing(4)
         lay.addWidget(self._ctrl_btn)
+
+        # Not a drawer: this one swaps the whole centre of the window for the
+        # Direction Projet page, and back.
+        self._dir_btn = QPushButton("◈  DIRECTION PROJET")
+        self._dir_btn.setFixedHeight(26)
+        self._dir_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._dir_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dir_btn.setToolTip("Direction Projet — un brief, et Jarvis fait tout le dossier")
+        self._dir_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 4px; padding: 0 10px;
+            }}
+            QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI_DIM}; }}
+            QPushButton:checked {{ color: {C.PRI}; border-color: {C.PRI}; background: {C.PRI_GHO}; }}
+        """)
+        self._dir_btn.setCheckable(True)
+        self._dir_btn.clicked.connect(self._toggle_direction)
+        lay.addSpacing(10)
+        lay.addWidget(self._dir_btn)
         lay.addStretch()
 
         mid = QVBoxLayout(); mid.setSpacing(1)
@@ -4814,6 +5331,42 @@ class MainWindow(QMainWindow):
             self._ctrl_drawer.raise_()
         else:
             self._ctrl_drawer.hide()
+
+    # ── Direction Projet ─────────────────────────────────────────────────────
+
+    def _toggle_direction(self, checked: bool):
+        if checked:
+            self._open_direction()
+        else:
+            self._close_direction()
+
+    def _open_direction(self):
+        self._close_setup()
+        self._close_controls()
+        if self._direction_page is None:
+            # Built on first use: by then the actions it drives are loaded.
+            try:
+                self._direction_page = DirectionPage(self.player)
+            except Exception as e:                      # noqa: BLE001 — logged, HUD stays
+                self._log.append_log(f"ERR: Direction Projet unavailable — {e}")
+                self._dir_btn.setChecked(False)
+                return
+            self._direction_page.back.connect(self._close_direction)
+            self._mode_stack.addWidget(self._direction_page)
+        self._direction_page.player = self.player
+        self._mode_stack.setCurrentWidget(self._direction_page)
+        # The page takes the monitor's column too; the activity log stays.
+        self._left_panel.hide()
+        self._sub_saved = self._sub_lbl.text()
+        self._sub_lbl.setText("Direction Projet")
+        self._dir_btn.setChecked(True)
+
+    def _close_direction(self):
+        self._mode_stack.setCurrentIndex(0)
+        self._left_panel.show()
+        if getattr(self, "_sub_saved", ""):
+            self._sub_lbl.setText(self._sub_saved)
+        self._dir_btn.setChecked(False)
 
     def _close_setup(self):
         if hasattr(self, "_quick_drawer"):
@@ -6044,6 +6597,9 @@ class JarvisUI:
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
         self._win = MainWindow()
+        # Background jobs started from the window (Direction Projet) report
+        # through this object, like the ones the voice tools start.
+        self._win.player = self
         self.root = _RootShim(self._app)
         self._win.show()
 
