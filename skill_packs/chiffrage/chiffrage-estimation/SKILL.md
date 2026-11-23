@@ -62,6 +62,11 @@ Monte Carlo of 10 000 runs on PERT-Beta laws that also gives the delay along
 the critical path. **One commits at P80 and aims at P50** — announce 32 j,
 not 30. The packages are assumed independent; in reality their errors go the
 same way, so the true spread is wider: that is what the cone reminds.
+Measured on large French State IT projects, the P80 of the final cost is
+×1.35 to ×1.63 of the first published figure, depending on the source
+(`.claude/skills/chiffrage-budget/reference/reperes-france.md`, section 1):
+on a long or still vague project, a P80 / P50 spread far narrower than that
+needs a reason, written in the assumptions.
 
 ## Overheads (proportional work)
 

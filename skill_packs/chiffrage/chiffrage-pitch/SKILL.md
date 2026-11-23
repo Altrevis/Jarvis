@@ -84,6 +84,14 @@ Write 6 to 10, with a short answer and the figure that backs it:
   this date, and the milestones where we re-estimate.
 - « D'où sortent vos TJM ? » → the sources of `budget.json`.
 - « Et si l'hypothèse X tombe ? » → its impact, written in the assumptions.
+- « Une provision, vraiment ? » → measured overruns of French State IT
+  projects: 65 % cost more than at launch (Cour des comptes, 2020, p. 143).
+- « Pourquoi des lots plutôt que tout d'un coup ? » → the Cour links size
+  and failure and recommends 18 months to 3 years per project (p. 7, 9).
+
+Figures, sources and pages for these two answers are in
+`.claude/skills/chiffrage-budget/reference/reperes-france.md`; quote the
+source with the figure.
 
 ## Style
 

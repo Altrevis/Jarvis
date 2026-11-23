@@ -73,7 +73,10 @@ counted in the last year.
   years needs a reason (differentiation, data ownership, specific rules).
 - `gains` (optional): what the project saves or earns a year (time saved ×
   loaded cost, revenue, avoided licences), with a `basis`. The calculator
-  gives the ROI and the payback year. Be conservative: gains are estimates
+  gives the ROI and the payback year. French public references (the State's
+  MAREVA 2 method, discount rate 2 or 4 %, mean payback 5.7 years, a
+  project budget counted as build + two years of maintenance) are in
+  `.claude/skills/chiffrage-budget/reference/reperes-france.md`, sections 3–4. Be conservative: gains are estimates
   too.
 
 ```json

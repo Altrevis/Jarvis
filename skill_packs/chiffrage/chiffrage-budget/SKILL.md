@@ -84,6 +84,13 @@ plain sight:
   cost. Zero when the TJM are already selling rates, zero internally.
 - `vat`: 0.2 by default (0 for `interne`).
 
+To defend these lines, `.claude/skills/chiffrage-budget/reference/reperes-france.md`
+holds measured French figures, with their source and page: how much the
+State's IT projects overran (section 1), the share of costs outside
+development (about 15 %), the internal labour a budget must count and its
+full cost (section 2). Read the section you need; they back the reserve,
+they do not replace the estimate's own P50 → P80.
+
 ## Payment schedule
 
 At a fixed price, `schedule` splits the price by milestone, shares adding
