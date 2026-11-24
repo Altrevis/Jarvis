@@ -28,7 +28,9 @@ Files (all in chiffrage/; each skill's SKILL.md holds the shape it writes):
     tco.json         run costs over 3 to 5 years, end of life, alternatives, gains
     pitch.md         the oral defence (only its sections are checked)
 
-Also read when present: scrum/product-backlog.json (story coverage, points).
+Also read when present: scrum/product-backlog.json (story coverage, points)
+and ddd/contextes.json (the bounded contexts of the ddd pack: a work package
+stays inside one).
 
 Sources of the constants: cone of uncertainty — Boehm (1981), McConnell,
 Software Estimation (2006); PERT — Malcolm et al. (1959); function point
@@ -276,6 +278,24 @@ def read_wbs(w, backlog, c: Check) -> dict | None:
 
     return {"nodes": nodes, "ids": ids, "leaves": leaves, "kinds": kinds, "deps": deps, "users": users,
             "order": order, "phase": phase, "hpd": hpd, "start": start, "under": under}
+
+
+def wbs_contexts(W: dict, contexts, c: Check) -> None:
+    """With a domain model (ddd/contextes.json, the ddd pack): a work package
+    whose stories belong to two bounded contexts is two packages — the two
+    halves are built, tested and estimated against two different models."""
+    if not isinstance(contexts, dict):
+        return
+    owner = {}
+    for b in contexts.get("contexts") or []:
+        if isinstance(b, dict) and b.get("kind", "internal") == "internal":
+            for s in b.get("stories") or []:
+                owner.setdefault(str(s), str(b.get("id", "?")))
+    for i in W["leaves"]:
+        found = sorted({owner[str(s)] for s in W["nodes"][i].get("stories") or [] if str(s) in owner})
+        if len(found) > 1:
+            c.warn("wbs.json", f"{i}: its stories belong to {' and '.join(found)} in ddd/contextes.json "
+                               "— a work package that crosses bounded contexts is two packages")
 
 
 # ── Estimation ──────────────────────────────────────────────────────────────
@@ -1115,6 +1135,8 @@ def compute(root: Path, c: Check) -> tuple[dict, dict | None, dict | None]:
     backlog = load(root / "scrum" / "product-backlog.json", c)
     S: dict = {}
     W = read_wbs(files["wbs"], backlog, c) if files["wbs"] is not None else None
+    if W:
+        wbs_contexts(W, load(root / "ddd" / "contextes.json", c), c)
     if files["wbs"] is None and any(files[n] is not None for n in ("estimation", "budget", "tco")):
         c.err("wbs.json", "missing — every other file is built on the WBS")
     E = B = T = None

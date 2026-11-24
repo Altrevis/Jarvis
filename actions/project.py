@@ -112,9 +112,33 @@ _STEP_TASKS = {
                "nothing, create no account: write it all to replica/deploy-plan.md."),
 }
 _IDEA_DESIGN = (" There is no original to measure: design an original system that "
-                "fits the brief in CLAUDE.md.")
+                "fits the brief in CLAUDE.md. The app does not exist yet: write the tokens, "
+                "their CSS and the component specs in replica/design/; the build step "
+                "creates the project and codes the components.")
 _IDEA_DIFF = (" There is no original to screenshot: run only the feature parity "
               "score (parity.py) against the spec, and write replica/parity.md.")
+# When the project file holds a domain model (the ddd pack, copied into
+# docs/ddd/ by actions/direction.py), the steps that shape the code follow it.
+_DDD_HINTS = {
+    "spec": ("docs/ddd/ddd.md holds the domain model. In replica/recon.md name the "
+             "screens, flows and data with the glossary's terms, and take the inferred "
+             "data model from the aggregates and value objects of docs/ddd/modele.json."),
+    "architect": ("Follow docs/ddd/ddd.md: one module or folder per bounded context, named "
+                  "by its `code`; the schema follows the aggregates — a table per entity, "
+                  "value objects as columns or embedded types, foreign keys to aggregate "
+                  "roots only, one transaction per aggregate; an adapter for each "
+                  "anticorruption layer of the context map. Write the mapping in "
+                  "replica/decisions.md."),
+    "build": ("Write the code in the language of docs/ddd/ddd.md: classes, functions, tables "
+              "and routes take the glossary's `code` names, never a word of an `avoid` list; "
+              "the domain layer of a model-driven context depends on no framework; a Smart "
+              "UI context stays plain CRUD."),
+    "backend": ("External systems go through the anticorruption layer docs/ddd/contextes.json "
+                "names; repositories exist for aggregate roots only."),
+    "test": ("Name the tests after the acceptance criteria and the specifications of "
+             "docs/ddd/modele.json, in the glossary's words, and test each aggregate's "
+             "invariants."),
+}
 
 # The licence and GDPR scan (core/quality) leaves out the clone's reference
 # screenshots of the original: research material, gitignored, never shipped.
@@ -123,11 +147,25 @@ _LEGAL_SKIP = ("replica/screens",)
 _STEP_FINAL = ("Your final message is read out by the voice model: at most five "
                "sentences on what you did and what comes next, then, alone on the "
                "last line, `STEP: done` when this step is complete or "
-               "`STEP: partial — <what remains>` when it is not.")
+               "`STEP: partial — <what remains>` when it is not. What remains is content "
+               "of this step that is missing: never a command or a check you could not "
+               "run (the assistant runs them after you), never the work of a later step.")
 _TASK_FINAL = ("Your final message is read out by the voice model: at most five "
                "sentences on what you changed and anything the user must do.")
 _STEP_RE = re.compile(r"^\s*`?STEP:\s*(done|partial)\b\s*[—–:-]?\s*(.*?)`?\s*$",
                       re.I | re.M)
+# A part of "what remains" that is no work left: a command the agent could not
+# run, a check it could not make — the assistant makes every check itself
+# after the run — or a livrables/ file the assistant draws itself. Taken on the
+# agent's word, these left a whole Direction run "partial" on 2026-11-24 while
+# every file was there and passed the assistant's checks.
+_NOT_WORK = re.compile(
+    r"refus|denied|not allowed|non autoris|\bbash\b|\bshell\b|--check|non ex[ée]cut"
+    r"|not (?:been )?run|could ?n[o']t run|pas pu (?:la |le |les )?(?:lancer|ex[ée]cuter)"
+    r"|livrables/", re.I)
+# Where "what remains" is cut into parts: `;` and « et » / "and" — never
+# inside brackets or backquotes.
+_CUT = re.compile(r"[()`;]|,?\s+(?:et|and)\s+")
 
 _run_lock = threading.Lock()
 _running: dict[str, str] = {}     # slug -> what it is doing right now
@@ -213,7 +251,12 @@ def _find(name: str) -> tuple[Path, dict] | None:
 
 
 def _pipeline(state: dict) -> tuple[str, ...]:
-    return CLONE_STEPS if state.get("kind") == "clone" else IDEA_STEPS
+    if state.get("kind") == "clone":
+        return CLONE_STEPS
+    if state.get("static"):
+        # A showcase site: pages and content, nothing to store or log into.
+        return tuple(s for s in IDEA_STEPS if s != "backend")
+    return IDEA_STEPS
 
 
 def _next_step(state: dict) -> str | None:
@@ -258,6 +301,9 @@ def _brief(state: dict) -> str:
     else:
         what = ("An original project. There is no app to clone: the `spec` step "
                 "turns this brief into replica/recon.md and replica/features.csv.")
+    if state.get("static"):
+        what += (" A static site: no backend, no database, no accounts — a static build "
+                 "any host serves. Keep the stack, the pages and the effort that small.")
     lang = state.get("language") or "the user's language"
     return (
         f"# {state['name']}\n\n{what}\n\n"
@@ -299,6 +345,8 @@ def _create(p: dict, player) -> str:
         "language": str(p.get("language") or "").strip(),
         "created": _now(), "steps": {},
     }
+    if p.get("static") and not target:
+        state["static"] = True
     skills = path / ".claude" / "skills"
     skills.mkdir(parents=True)
     for d in sorted(_PACK.glob("replica-*")):
@@ -354,16 +402,56 @@ def _agent_system(state: dict, language: str, final: str) -> str:
         f"{lang_line}{final}")
 
 
+def _clauses(text: str) -> list[str]:
+    """`text` cut where _CUT says, outside brackets and backquotes."""
+    parts, start, depth, tick = [], 0, 0, False
+    for m in _CUT.finditer(text):
+        tok = m.group()
+        if tok == "`":
+            tick = not tick
+        elif tok == "(":
+            depth += 1
+        elif tok == ")":
+            depth = max(0, depth - 1)
+        elif not tick and depth == 0:
+            parts.append(text[start:m.start()])
+            start = m.end()
+    parts.append(text[start:])
+    return [p.strip(" ,.") for p in parts if p.strip(" ,.")]
+
+
+def _work_left(remains: str) -> str:
+    """`remains` without its parts that are no work left (_NOT_WORK); as the
+    agent wrote it when every part is work."""
+    parts = _clauses(remains)
+    kept = [c for c in parts if not _NOT_WORK.search(c)]
+    return remains if len(kept) == len(parts) else "; ".join(kept)
+
+
 def _step_status(text: str) -> tuple[str, str, str]:
     """(status, what remains, the report without its STEP line). An agent that
     forgot the line is taken at its word that it finished: re-running a step
-    nobody asked to re-run is the expensive mistake."""
+    nobody asked to re-run is the expensive mistake. A partial whose only
+    reasons are commands it could not run is done: the caller's own checks
+    decide those."""
     found = list(_STEP_RE.finditer(text or ""))
     if not found:
         return "done", "", (text or "").strip()
     m = found[-1]
     report = (text[:m.start()] + text[m.end():]).strip()
-    return m.group(1).lower(), m.group(2).strip(), report
+    status, remains = m.group(1).lower(), m.group(2).strip()
+    if status == "partial" and remains:
+        remains = _work_left(remains)
+        if not remains:
+            status = "done"
+    return status, remains, report
+
+
+def _denied(res) -> list[str]:
+    """What the allowlist refused in a run (the first five), kept in the step's
+    record: to widen it knowingly, or to see an agent going through the shell."""
+    return [str((d.get("tool_input") or {}).get("command") or d.get("tool_name") or "")[:120]
+            for d in getattr(res, "denials", None) or () if isinstance(d, dict)][:5]
 
 
 def _record(path: Path, key: str, rec: dict) -> dict:
@@ -395,6 +483,8 @@ def _run_one(path: Path, state: dict, step: str, request: str, language: str,
     model = _model_for(step)
     timeout = _HEAVY_TIMEOUT if step in _HEAVY else _LIGHT_TIMEOUT
     prompt = request if is_task else _step_task(state, step)
+    if not is_task and step in _DDD_HINTS and (path / "docs" / "ddd" / "ddd.md").is_file():
+        prompt += "\n\n" + _DDD_HINTS[step]
     if is_task:
         prompt += ("\n\nRead CLAUDE.md and the replica/ files that matter first. If "
                    "you change the app, keep replica/features.csv and "
@@ -447,8 +537,16 @@ def _run_one(path: Path, state: dict, step: str, request: str, language: str,
         status = "partial"
         remains = (f"{len(legal)} licence / GDPR problem(s) left, first: {legal[0]}"
                    + (f" — {remains}" if remains else ""))
+    if step == "design":
+        weak = _contrast(path)
+        if weak:
+            status = "partial"
+            remains = (f"contrast: {len(weak)} problem(s), first: {weak[0]}"
+                       + (f" — {remains}" if remains else ""))
     rec.update(status="done" if is_task else status, remains=remains,
                report=report[:2000], tokens=tokens, cached=cached, minutes=round(minutes, 1))
+    if _denied(res):
+        rec["denied"] = _denied(res)
     if is_task:
         state = _load(path) or state
         state.setdefault("tasks", []).append({"request": request[:300], **rec})
@@ -529,6 +627,27 @@ def _parity(path: Path) -> str:
                 f"{data.get('must_have_done', 0)}/{data.get('must_have_total', 0)}")
     except Exception:
         return ""
+
+
+def _contrast(path: Path) -> list[str]:
+    """What fails WCAG AA in replica/design/tokens.json ('text-muted on surface
+    3.9:1'), or why it could not be checked. Runs the vendored contrast.py —
+    the reviewed copy — so the design step is verified without the agent's
+    shell."""
+    tokens = path / "replica" / "design" / "tokens.json"
+    tool = _PACK / "replica-design" / "contrast.py"
+    if not tokens.is_file():
+        return ["replica/design/tokens.json was not written"]
+    if not tool.is_file():
+        return []
+    try:
+        out = subprocess.run([sys.executable, "-I", str(tool), str(tokens), "--json"],
+                             capture_output=True, text=True, timeout=20)
+        pairs = json.loads(out.stdout or "[]")
+    except Exception as e:
+        return [f"contrast.py could not read replica/design/tokens.json ({str(e)[:120]})"]
+    return [f"{p.get('fg')} on {p.get('bg')} {p.get('ratio')}:1"
+            for p in pairs if isinstance(p, dict) and not p.get("aa")]
 
 
 def _status_text(path: Path, state: dict) -> str:

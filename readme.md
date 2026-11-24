@@ -396,11 +396,20 @@ The **◈ DIRECTION PROJET** button in the header swaps the HUD for a page of it
 | Phase | What runs | Where it lands |
 |---|---|---|
 | Dossier Scrum & cahier des charges | the 8 Scrum steps, then the cahier des charges printed to PDF and Word | `Documents/JARVIS/scrum/<name>/` |
-| Chiffrage | WBS → estimation → budget → TCO → pitch (`skill_packs/chiffrage/`), built on the backlog, every figure computed by `chiffrage.py` | same workspace, `livrables/chiffrage.md` |
-| Code | the Replica pipeline for an original idea, `spec` → `diff`, started from the cahier des charges, the backlog and the estimate copied into `docs/` | `Documents/JARVIS/projects/<name>/` |
-| Présentation | the defence deck (PowerPoint + web) built on the pitch and the figures — only once the other ticked phases are complete | `Documents/JARVIS/documents/` |
+| Modèle du domaine (DDD) | ubiquitous language → bounded contexts and context map → aggregates (`skill_packs/ddd/`), drawn from the cahier des charges and the backlog, checked by `ddd.py` | same workspace, `livrables/ddd.md` |
+| Chiffrage | WBS → estimation → budget → TCO → pitch (`skill_packs/chiffrage/`), built on the backlog and the bounded contexts, every figure computed by `chiffrage.py` | same workspace, `livrables/chiffrage.md` |
+| Code | the Replica pipeline for an original idea, `spec` → `diff`, started from the cahier des charges, the backlog, the domain model and the estimate copied into `docs/` | `Documents/JARVIS/projects/<name>/` |
+| Présentation | the defence deck (PowerPoint + web) built on the pitch, the figures and the context map — only once the other ticked phases are complete | `Documents/JARVIS/documents/` |
 
-The questionnaire becomes the brief locally, with no model call. Each step is the same one the `scrum` and `project` tools run, with the same checks, so a project started here can be continued by voice and the other way round. The page shows how many agent runs each phase costs and on which model, follows every step live, and opens each output. **Nothing is done twice:** launching again on the same name resumes where it stopped — after the STOP button (it ends after the step in progress), Claude's usage limit, or a step left partial that the next ones build on. The brief is kept in `Documents/JARVIS/direction/<name>/brief.md`. Override the chiffrage model with `chiffrage_model` / `chiffrage_models`.
+**The domain model is the join between the project file and the code** (Eric Evans, *Domain-Driven Design*, 2003). The specification says what is wanted in the client's words; three Sonnet agents turn those words into the model the code is written in:
+
+- `domaine` — the **ubiquitous language** (each term with its definition, its name in the code and the synonyms to avoid), the subdomains — the **core** that makes the product worth building, the supporting ones, the **generic** ones to buy or take open source — with an honest approach for each (a CRUD back-office stays Smart UI), the domain vision statement and the questions a domain expert should settle;
+- `contextes` — the **bounded contexts**, each backlog story and requirement given to exactly one, the external systems of the cahier des charges, and the **context map** (customer-supplier, conformist, anticorruption layer, open host service, published language, shared kernel, separate ways);
+- `modele` — per context: **aggregates** with their root and the invariants they protect (taken from the RG rules), entities, value objects, services, repositories for roots only, **specifications** taken from the acceptance criteria, domain events between contexts, modules.
+
+`ddd.py` checks it all locally (a story in two contexts, a reference to an entity inside another aggregate, a repository for something that is not a root, a model name missing from the glossary or on an *avoid* list are found the same way every time) and writes `livrables/ddd.md` with the context map as a Mermaid diagram and the traceability story → context → aggregate. Then the model flows downstream: the **chiffrage** keeps each work package inside one context (bought generic subdomains become integration packages, each anticorruption layer a package, aggregates count as ILF in the function points); the **code** project gets `docs/ddd/`, and its `spec`, `architect`, `build`, `backend` and `test` steps follow it — a folder per context, one transaction per aggregate, the glossary's names in classes, tables, routes and tests; after the build, `ddd.py --code` reads the code back (model names found, words to avoid used) for **zero tokens**; the **deck** gets the core and the context map.
+
+The questionnaire becomes the brief locally, with no model call. Each step is the same one the `scrum` and `project` tools run, with the same checks, so a project started here can be continued by voice and the other way round. The page shows how many agent runs each phase costs and on which model, follows every step live, and opens each output. **Nothing is done twice:** launching again on the same name resumes where it stopped — after the STOP button (it ends after the step in progress), Claude's usage limit, or a step left partial that the next ones build on. The brief is kept in `Documents/JARVIS/direction/<name>/brief.md`. Override the models with `ddd_model` / `ddd_models` and `chiffrage_model` / `chiffrage_models`.
 
 ---
 
@@ -501,13 +510,15 @@ Mark LV/
 │   ├── video_player.py       # Plays video on the HUD, where the avatar normally is
 │   ├── project.py            # Software projects, one folder each, built step by step with Replica
 │   ├── scrum.py              # Scrum deliverables, one workspace each, drawn locally
+│   ├── ddd.py                # Runs the DDD pack in a Scrum workspace; reads the code back (no voice tool)
 │   ├── chiffrage.py          # Runs the chiffrage pack in a Scrum workspace (no voice tool)
-│   ├── direction.py          # Direction Projet: Scrum → chiffrage → code → deck in one job
+│   ├── direction.py          # Direction Projet: Scrum → DDD → chiffrage → code → deck in one job
 │   ├── agents.py             # The agent team, by voice: missions, delegation, status
 │   └── desktop.py            # Desktop and taskbar control
 ├── skill_packs/
 │   ├── replica/              # Replica skills (MIT), copied into each project — not loaded globally
 │   ├── scrum/                # Scrum skills + render.py, copied into each workspace
+│   ├── ddd/                  # Domain-Driven Design skills + ddd.py: the join Scrum file → code
 │   └── chiffrage/            # Estimate & costing skills + chiffrage.py, copied the same way
 ├── skill_spaces/             # One folder of skills per IT domain, one specialist agent each
 │   └── <domain>/SPACE.md     #   the specialist's role, routing words, model, shell presets

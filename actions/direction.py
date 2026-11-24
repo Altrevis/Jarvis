@@ -4,20 +4,25 @@ direction — « Direction Projet »: one brief in, the whole project file out.
 WHAT IT DOES
     The user describes a project once, on the Direction Projet page of the
     window (ui.py: a free prompt, or a questionnaire), and this chains in one
-    background job what would otherwise be four separate requests:
+    background job what would otherwise be five separate requests:
 
         scrum         the Scrum file, cahier des charges included, then its
                       PDF and Word export                    (actions/scrum.py)
+        ddd           the domain model: ubiquitous language → bounded
+                      contexts and context map → aggregates, in the same
+                      workspace                                (actions/ddd.py)
         chiffrage     WBS → estimation → budget → TCO → pitch, in the same
                       workspace                          (actions/chiffrage.py)
         code          the Replica pipeline for an original idea, spec → diff,
-                      started from the cahier des charges and the backlog
-                                                           (actions/project.py)
+                      started from the cahier des charges, the backlog and
+                      the domain model                     (actions/project.py)
         presentation  the defence deck, PowerPoint and web
                                                    (actions/create_document.py)
 
-    The order is the one the deliverables depend on: the estimate is built on
-    the backlog, the code follows the specification, the deck tells all three.
+    The order is the one the deliverables depend on: the domain model is
+    drawn from the specification and the backlog, the estimate breaks the
+    work down by bounded context, the code is written in the model's
+    language, the deck tells all of it.
 
 WHY IT CALLS THE STEP FUNCTIONS AND NOT THE TOOLS
     Each tool starts its own background job and returns at once, so chaining
@@ -28,9 +33,9 @@ WHY IT CALLS THE STEP FUNCTIONS AND NOT THE TOOLS
     and the other way round.
 
 WHAT IT COSTS, AND HOW THAT STAYS UNDER CONTROL
-    It is the most expensive thing the assistant does: up to 21 agent runs
-    (Scrum 8 and chiffrage 5 on Sonnet, the code 7 of which architect, build
-    and backend on the agent model, the deck 1). So:
+    It is the most expensive thing the assistant does: up to 24 agent runs
+    (Scrum 8, DDD 3 and chiffrage 5 on Sonnet, the code 7 of which architect,
+    build and backend on the agent model, the deck 1). So:
     - the page shows how many runs each phase is and on which model, and any
       phase can be left out;
     - the questionnaire is turned into a brief here, locally: no model call;
@@ -57,20 +62,26 @@ from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
-from actions import chiffrage, create_document, project, scrum
+from actions import chiffrage, create_document, ddd, project, scrum
 from actions.project import _slug
 from core import claude, jobs
 from core.user_dirs import jarvis_documents_dir
 
-PHASES = ("scrum", "chiffrage", "code", "presentation")
+PHASES = ("scrum", "ddd", "chiffrage", "code", "presentation")
 LABELS = {
     "scrum": "Dossier Scrum & cahier des charges",
+    "ddd": "Modèle du domaine DDD (langage → contextes → agrégats)",
     "chiffrage": "Chiffrage (WBS → budget → TCO → pitch)",
     "code": "Code (Replica : spec → build → tests)",
     "presentation": "Présentation de soutenance (PowerPoint + web)",
 }
 _STATE = "direction.json"
 _DECK_SLIDES = 12
+# Questionnaire types that are pages and content: nothing to store, no one to
+# log in. Their code is a static site (no backend step), and the page unticks
+# the domain model for them — Evans keeps DDD for complex domains, and a
+# showcase site has no business logic to model.
+STATIC_TYPES = ("Site vitrine",)
 # Every Claude slot busy with other work (a voice request, another job): wait
 # this long between tries rather than give up a run of twenty steps.
 _SLOT_PAUSE = 30
@@ -143,6 +154,7 @@ def plan() -> list[dict]:
     agent = claude.model_for(claude.AGENT)
     runs = {
         "scrum": [scrum._model_for(s) for s in scrum.STEPS],
+        "ddd": [ddd.model_for(s) for s in ddd.STEPS],
         "chiffrage": [chiffrage.model_for(s) for s in chiffrage.STEPS],
         "code": [project._model_for(s) for s in project.IDEA_STEPS],
         "presentation": [agent],
@@ -185,12 +197,22 @@ def _bullets(text) -> str:
     return "\n".join(f"- {item}" for item in items if item)
 
 
+def is_static(answers: dict | None) -> bool:
+    """A project whose code is a static site: a STATIC_TYPES questionnaire
+    answer. A free prompt is never guessed at ("un site vitrine et une
+    boutique" is not one)."""
+    return _one_line((answers or {}).get("type")) in STATIC_TYPES
+
+
 def brief_from_answers(a: dict) -> str:
     """The questionnaire as the brief every agent reads (CLAUDE.md), in French
     like the deliverables. Empty answers are left out, never invented."""
     head = []
     if _one_line(a.get("type")):
         head.append(f"Type de projet : {_one_line(a['type'])}")
+    if is_static(a):
+        head.append("Taille : des pages et du contenu, sans back-end, base de données ni "
+                    "comptes — chaque livrable reste à la mesure d'un site vitrine")
     if _one_line(a.get("cadre")):
         head.append(f"Cadre : {_one_line(a['cadre'])}")
 
@@ -380,6 +402,32 @@ def _phase_scrum(player, path: Path, state: dict, stop, progress) -> dict:
     return {"status": "partial" if left else "done", "note": "; ".join(left)}
 
 
+def _phase_ddd(player, path: Path, state: dict, stop, progress) -> dict:
+    """The domain model, in the Scrum workspace next to scrum/: drawn from the
+    cahier des charges and the backlog, read by the chiffrage and the code."""
+    slug, lang = state["slug"], state["language"]
+    ws = _scrum_workspace(path, state)
+    ddd.install(ws)
+    todo = [s for s in ddd.STEPS if not ddd.done(ws, s)]
+    with _busy(scrum, slug):                         # the same folder as the Scrum file
+        for step in todo:
+            _guard(stop)
+            _step(path, scrum, slug, "ddd", step)
+            progress(f"ddd · {step} …")
+            rec = _retrying(lambda: ddd.run_step(ws, state["name"], step, lang, progress,
+                                                 tuple(todo)), stop, progress)
+            if rec.get("status") != "done":
+                # The contexts are drawn on the language, the aggregates in the
+                # contexts: going on would model on a boundary that does not hold.
+                return {"status": "partial",
+                        "note": f"{step} : {rec.get('remains') or 'voir le rapport'}"}
+    ddd.calc(ws)
+    report = ws / "livrables" / "ddd.md"
+    if report.is_file():
+        _set(path, ddd=str(report))
+    return {"status": "done", "note": ddd.headline(ws)}
+
+
 def _phase_chiffrage(player, path: Path, state: dict, stop, progress) -> dict:
     slug, lang = state["slug"], state["language"]
     ws = _scrum_workspace(path, state)
@@ -414,17 +462,24 @@ _DOCS_NOTE = (
     "their priorities) and docs/chiffrage.md (the estimate and the budget). The "
     "`spec` step builds replica/recon.md and replica/features.csv from them: the "
     "must-have stories are the must-haves, and nothing out of scope is built.")
+_DDD_NOTE = (
+    " The domain model is in docs/ddd/ (ddd.md to read; domaine.json, contextes.json "
+    "and modele.json for the exact names): the code is organised by its bounded "
+    "contexts, an aggregate is a transaction boundary, and every class, table, route "
+    "and test takes its name from the glossary — never a word of an `avoid` list.")
 _DOCS = (("scrum/cahier-des-charges.json", "cahier-des-charges.json"),
          ("scrum/product-backlog.json", "product-backlog.json"),
          ("livrables/chiffrage.md", "chiffrage.md"))
 
 
 def _copy_docs(ws: Path, pdir: Path) -> None:
-    """The latest specification, backlog and estimate into the project's docs/."""
+    """The latest specification, backlog, domain model and estimate into the
+    project's docs/."""
     for src, dest in _DOCS:
         if (ws / src).is_file():
             (pdir / "docs").mkdir(exist_ok=True)
             (pdir / "docs" / dest).write_bytes((ws / src).read_bytes())
+    ddd.copy_to(ws, pdir)
 
 
 def _phase_code(player, path: Path, state: dict, stop, progress) -> dict:
@@ -432,9 +487,12 @@ def _phase_code(player, path: Path, state: dict, stop, progress) -> dict:
     pdir = _project_dir(slug)
     ws = _scrum_dir(slug)
     has_docs = any((ws / src).is_file() for src, _ in _DOCS)
+    note = (_DOCS_NOTE + (_DDD_NOTE if (ws / "livrables" / "ddd.md").is_file() else "")
+            if has_docs else "")
     if not (pdir / project._STATE).is_file():
         made = project._create({"name": state["name"],
-                                "description": state.get("brief", "") + (_DOCS_NOTE if has_docs else ""),
+                                "description": state.get("brief", "") + note,
+                                "static": is_static(state.get("answers")),
                                 "language": lang, "start": False}, None)
         if not (pdir / project._STATE).is_file():
             raise RuntimeError(made)
@@ -453,18 +511,33 @@ def _phase_code(player, path: Path, state: dict, stop, progress) -> dict:
                 # The next step would build on a missing piece (project.py's rule).
                 return {"status": "partial",
                         "note": f"{step} : {rec.get('remains') or 'voir le rapport'}"}
-    parity = project._parity(pdir)
-    return {"status": "done", "note": parity}
+    # The code read back against the domain model: local, no agent.
+    notes = [n for n in (project._parity(pdir), ddd.check_code(ws, pdir)) if n]
+    return {"status": "done", "note": " · ".join(notes)}
+
+
+def _ddd_excerpt(ws: Path) -> str:
+    """The strategic part of the domain model (vision, subdomains, language,
+    contexts, map) for the deck: the per-context detail would only cost
+    tokens there."""
+    f = ws / "livrables" / "ddd.md"
+    if not f.is_file():
+        return ""
+    head = f.read_text(encoding="utf-8").split("\n## 6.")[0]
+    return f"--- ddd.md ---\n{head[:12_000]}"
 
 
 def _deck_sources(path: Path, slug: str) -> str:
-    """What the deck is built from: the brief, the pitch, the estimate and the
-    product's spec, whichever exist — in create_document's own format."""
+    """What the deck is built from: the brief, the pitch, the estimate, the
+    domain model and the product's spec, whichever exist — in
+    create_document's own format."""
     ws, pdir = _scrum_dir(slug), _project_dir(slug)
     files = [path / "brief.md", ws / "chiffrage" / "pitch.md", ws / "livrables" / "chiffrage.md",
              pdir / "replica" / "recon.md"]
     parts = [f"--- {f.name} ---\n{create_document._read_source(str(f))}"
              for f in files if f.is_file()]
+    if _ddd_excerpt(ws):
+        parts.insert(min(len(parts), 3), _ddd_excerpt(ws))
     if not parts:
         return ""
     return ("\nSOURCE MATERIAL — build the document from this; do not contradict it:\n"
@@ -478,9 +551,10 @@ def _phase_presentation(player, path: Path, state: dict, stop, progress) -> dict
     _set(path, current="presentation · deck")
     lang = state["language"]
     request = (f"La présentation de soutenance du projet « {state['name']} » devant un jury : "
-               f"le besoin, la solution et son périmètre, le chiffrage (charge, délai, budget, "
-               f"TCO), les risques et le planning, puis l'état du produit. Elle suit le pitch "
-               f"des sources et en reprend les chiffres tels quels.")
+               f"le besoin, la solution et son périmètre, le modèle du domaine quand les sources "
+               f"en ont un (le cœur du domaine, la carte des contextes, le langage commun), le "
+               f"chiffrage (charge, délai, budget, TCO), les risques et le planning, puis l'état "
+               f"du produit. Elle suit le pitch des sources et en reprend les chiffres tels quels.")
     sources = _deck_sources(path, state["slug"])
     out = web = preview = None
     if claude.enabled():
@@ -503,8 +577,8 @@ def _phase_presentation(player, path: Path, state: dict, stop, progress) -> dict
     return {"status": "done", "note": out.name}
 
 
-_RUN = {"scrum": _phase_scrum, "chiffrage": _phase_chiffrage, "code": _phase_code,
-        "presentation": _phase_presentation}
+_RUN = {"scrum": _phase_scrum, "ddd": _phase_ddd, "chiffrage": _phase_chiffrage,
+        "code": _phase_code, "presentation": _phase_presentation}
 _DECK_WAITS = ("en attente : la présentation se fait quand les autres étapes cochées sont "
                "terminées, pour reprendre leurs chiffres — relance pour la faire")
 
@@ -563,6 +637,9 @@ def _phase_steps(key: str, state: dict) -> list[tuple[str, str]]:
     if key == "scrum":
         records = (scrum._load(_scrum_dir(slug)) or {}).get("steps") or {}
         names = scrum.STEPS
+    elif key == "ddd":
+        records = ddd.load(_scrum_dir(slug)).get("steps") or {}
+        names = ddd.STEPS
     elif key == "chiffrage":
         records = chiffrage.load(_scrum_dir(slug)).get("steps") or {}
         names = chiffrage.STEPS
@@ -590,6 +667,7 @@ def outputs(state: dict) -> dict[str, str]:
     found = {
         "dossier": ws / "livrables" / "index.html",
         "cdc": state.get("cdc_docx") or state.get("cdc"),   # Word first: it is the editable one
+        "ddd": ws / "livrables" / "ddd.md",
         "chiffrage": ws / "livrables" / "chiffrage.md",
         "code": pdir / project._STATE,
         "deck": state.get("deck"),
@@ -640,15 +718,15 @@ def summary(path: Path) -> str:
     if info.get("note"):
         lines += ["", f"Arrêt : {info['note']}"]
     out = info.get("outputs") or {}
-    for key, label in (("cdc", "Cahier des charges"), ("chiffrage", "Chiffrage"),
-                       ("code", "Code"), ("deck", "Présentation")):
+    for key, label in (("cdc", "Cahier des charges"), ("ddd", "Modèle du domaine"),
+                       ("chiffrage", "Chiffrage"), ("code", "Code"), ("deck", "Présentation")):
         if key in out:
             lines.append(f"{label} : {out[key]}")
     return "\n".join(lines)
 
 
 def open_output(name: str, kind: str) -> str:
-    """Open one output ('dossier', 'cdc', 'chiffrage', 'code', 'deck', 'folder').
+    """Open one output ('dossier', 'cdc', 'ddd', 'chiffrage', 'code', 'deck', 'folder').
     '' when done, else why not."""
     state = _load(_root() / _slug(name)) if name.strip() else {}
     target = outputs(state).get(kind)

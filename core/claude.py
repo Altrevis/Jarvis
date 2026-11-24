@@ -83,6 +83,30 @@ AGENT_BASH = ("python3 *", "python *", "pip install *", "pip3 install *",
               "node *", "npm install *", "npx *", "ls *", "mkdir *", "cat *",
               "head *", "file *", "pdftoppm *", "soffice *", "libreoffice *")
 
+
+def shell_rules(extra: tuple[str, ...] = ()) -> str:
+    """What every agent with a shell is told before its own instructions.
+
+    Measured on a real Direction Projet run (2026-11-24): agents wrote their
+    files through the shell (`cat > f <<EOF`, `echo … >> f`), were refused,
+    concluded "Bash is refused", skipped the checks they could have run and
+    reported every step as partial — while the files were there and passed
+    the assistant's own check. The tools write files; the shell runs commands."""
+    from core.spaces import describe_commands
+    return (
+        "\n\nFILES AND SHELL — read this before your first command.\n"
+        "- Create and change files with the Write and Edit tools only, never through Bash: "
+        "`cat >`, `echo … >>`, `printf`, `tee`, any `>` redirection and any heredoc (`<<`) "
+        "are refused.\n"
+        f"- Bash runs only these commands, one per call: {describe_commands(extra)}. The "
+        "current directory is already the workspace: no `cd` is needed. No shell loop, no "
+        "`python3 -` fed by a heredoc: to run a script, write it with Write, then run "
+        "`python3 <file>.py`.\n"
+        "- A refused command means that form only: every command above still runs, so run "
+        "the exact command you were given anyway.\n"
+        "- The assistant runs every check again after you. A command you could not run is "
+        "never work left: do not report it.")
+
 # Concurrency. A one-shot is a few seconds of one process; an agent can run for
 # minutes and spawn its own. Both are capped so a burst of requests cannot fill
 # the machine with node processes. The agent cap is "claude_agent_slots" in
@@ -601,6 +625,8 @@ def agent(task: str, *, append_system: str = "", model: str = "",
         if allow_bash:
             allowed += tuple(f"Bash({p})" for p in AGENT_BASH + tuple(extra_bash))
         disallowed = tuple(f"Bash({p})" for p in deny_bash) if allow_bash else ()
+        if allow_bash:
+            append_system = shell_rules(tuple(extra_bash)) + append_system
         return run(task, model=model or model_for(AGENT), append_system=append_system,
                    tools=tools, allowed=allowed, disallowed=disallowed,
                    add_dirs=add_dirs, cwd=cwd,

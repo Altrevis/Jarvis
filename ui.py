@@ -3326,8 +3326,8 @@ class DirectionPage(QWidget):
                "Interne entreprise", "Personnel")
     _DONNEES = ("Oui", "Non", "Je ne sais pas")
     _OUTPUTS = (("dossier", "DOSSIER SCRUM"), ("cdc", "CAHIER DES CHARGES"),
-                ("chiffrage", "CHIFFRAGE"), ("code", "CODE"), ("deck", "PRÉSENTATION"),
-                ("folder", "📁  DOSSIER"))
+                ("ddd", "MODÈLE DU DOMAINE"), ("chiffrage", "CHIFFRAGE"), ("code", "CODE"),
+                ("deck", "PRÉSENTATION"), ("folder", "📁  DOSSIER"))
 
     def __init__(self, player=None, parent=None):
         super().__init__(parent)
@@ -3481,8 +3481,8 @@ class DirectionPage(QWidget):
     def _build_project(self) -> None:
         self._lay.addWidget(self._text(
             "Décris le projet une fois : Jarvis enchaîne le dossier Scrum et le cahier des "
-            "charges, le chiffrage, le code puis la présentation, chaque étape construite "
-            "sur la précédente."))
+            "charges, le modèle du domaine (DDD), le chiffrage, le code puis la présentation, "
+            "chaque étape construite sur la précédente."))
         self._section("PROJET")
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -3548,6 +3548,7 @@ class DirectionPage(QWidget):
             lay.addSpacing(4)
 
         box, self._q_type = self._chips(self._TYPES)
+        self._q_type.buttonClicked.connect(self._type_picked)
         ask("1. Quel type de projet ?", box)
         self._q_besoin = self._area("Le problème, aujourd'hui, et ce qui doit changer")
         ask("2. Quel problème résout-il ?  (obligatoire)", self._q_besoin,
@@ -3678,6 +3679,24 @@ class DirectionPage(QWidget):
     def _picked(group: QButtonGroup) -> str:
         b = group.checkedButton()
         return b.text() if b else ""
+
+    def _type_picked(self, button) -> None:
+        """A showcase site has no business logic to model: its domain-model
+        phase is unticked, and ticked back when another type is picked."""
+        ddd = getattr(self, "_phase_btns", {}).get("ddd")
+        if ddd is None:
+            return
+        static = button.text() in self._api.STATIC_TYPES
+        if static and ddd.isChecked():
+            ddd.setChecked(False)
+            self._ddd_auto_off = True
+            self._say(f"{button.text()} : le modèle du domaine est décoché (rien de métier à "
+                      f"modéliser) et le code sera un site statique, sans back-end. Recoche-le "
+                      f"si tu y tiens.")
+        elif not static and getattr(self, "_ddd_auto_off", False):
+            ddd.setChecked(True)
+            self._ddd_auto_off = False
+            self._say("")
 
     def _answers(self) -> dict:
         return {

@@ -91,3 +91,47 @@ in the project's Scrum workspace, runs one step per agent, checks each with
 the reviewed copy here and sends the errors back to a correction run, like the
 Scrum pack. Today only the Direction Projet run (`actions/direction.py`)
 starts it.
+
+With a domain model in the same workspace (`ddd/`, below), `chiffrage-wbs`
+keeps every work package inside one bounded context (the check warns when a
+package's stories belong to two), makes the bought generic subdomains
+integration packages and the anticorruption layers packages of their own;
+`chiffrage-estimation` counts one ILF per aggregate and one EIF per external
+context for the function points; `chiffrage-tco` costs the bought generic
+subdomains and compares them with building them.
+
+## ddd/
+
+Ours. Three skills of Domain-Driven Design (Eric Evans, *Domain-Driven
+Design*, 2003): the join between the Scrum file and the code. They read the
+Scrum pack's `scrum/cahier-des-charges.json` (glossary, requirements and
+their RG rules, interfaces, data) and `scrum/product-backlog.json`, and write
+in the workspace's `ddd/`:
+
+| Skill | Writes |
+|---|---|
+| `ddd-domaine` | `domaine.json` (domain vision statement, subdomains core / supporting / generic with how each is built — model-driven, transaction script, Smart UI, buy, open source —, the ubiquitous language: term, definition, name in the code, words to avoid; questions for the domain experts) |
+| `ddd-contextes` | `contextes.json` (bounded contexts, the stories, requirements and modules each owns, the external systems, the context map: customer-supplier, conformist, anticorruption layer, open host service, published language, shared kernel, separate ways, partnership; homonyms) |
+| `ddd-modele` | `modele.json` (per model-driven context: aggregates with root, entities, invariants from the RG rules, commands and references; value objects, services, specifications from the acceptance criteria, domain events, modules) |
+
+`ddd.py` — standard library only, no network — checks them and writes
+`livrables/ddd.md` (synthesis, language table, contexts, the context map as
+a Mermaid diagram, the model per context, story → context → aggregate
+traceability, the folder layout and rules the code follows). `--check`
+validates only: every non-`wont` story in exactly one context, a core
+subdomain, references only to aggregate roots and across a relation of the
+map, repositories for roots only, no word of an `avoid` list in the model,
+interfaces of the cahier des charges on the map, model names in the
+glossary… `--code DIR` reads a code folder back against the model (model
+names found as identifiers, avoided words used, a folder per context).
+
+Installed like the other packs (`.claude/skills/` and
+`.claude/ddd-kit/ddd.py` in the Scrum workspace) by `actions/ddd.py` (no
+voice tool). Direction Projet runs it between the Scrum file and the
+chiffrage, copies `ddd/*.json` and `ddd.md` to the code project's
+`docs/ddd/`, where the spec, architect, build, backend and test steps of
+`actions/project.py` follow it, and after the build reads the code back with
+`--code` (no agent).
+
+For DDD on any other codebase, Jarvis included, the agent team has the
+`domain-driven-design` skill in `skill_spaces/architecture/`.

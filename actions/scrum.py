@@ -66,7 +66,7 @@ from pathlib import Path
 
 from actions.create_document import _open as _open_file, _read_source
 from actions.project import (_STEP_FINAL, _TASK_FINAL, _assistant_name, _claude_unavailable,
-                             _config, _now, _slug, _step_status)
+                             _config, _denied, _now, _slug, _step_status)
 from core import claude, jobs
 from core.user_dirs import jarvis_documents_dir
 
@@ -724,11 +724,8 @@ def _agent_system(state: dict, language: str, final: str) -> str:
         f"Keep token use low. Read only the scrum/ files this step needs; do not re-read a "
         f"file you already have; do not paste file contents into your messages.\n"
         f"Check your files with this exact command, on its own: "
-        f"`python3 .claude/scrum-kit/render.py . --check` (`python` on Windows) — never in a "
-        f"loop (`for`, `while`) or a script: shell loops are refused. If a command is "
-        f"refused, carry on and finish the files: the assistant runs the same check after "
-        f"you and sends any error back to be fixed. A refused command is never a reason to "
-        f"report the step as partial.\n"
+        f"`python3 .claude/scrum-kit/render.py . --check` (`python` on Windows). The "
+        f"assistant runs the same check after you and sends any error back to be fixed.\n"
         f"{lang_line}{final}")
 
 
@@ -848,14 +845,13 @@ def _run_one(path: Path, state: dict, step: str, request: str, focus: str,
     if left:
         status = "partial"
         remains = f"{len(left)} error(s) the check still finds — {left[0]}"
-    denied = [str((d.get("tool_input") or {}).get("command") or d.get("tool_name") or "")[:120]
-              for d in res.denials or () if isinstance(d, dict)]
+    denied = _denied(res)
     rec.update(status=status, remains=remains,
                report=report[:2000], tokens=res.tokens_in + res.tokens_out + fix_tokens,
                cached=res.tokens_cached, minutes=round(res.duration_s / 60, 1),
                checked=not left)
     if denied:
-        rec["denied"] = denied[:5]          # what the allowlist refused, to widen it knowingly
+        rec["denied"] = denied              # what the allowlist refused, to widen it knowingly
     fresh = _load(path) or state
     if is_task or focus:
         # One deliverable redone is not the step done: the step's record stays.

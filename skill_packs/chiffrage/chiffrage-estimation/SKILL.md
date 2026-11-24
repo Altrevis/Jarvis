@@ -96,7 +96,9 @@ productivity used?) and write it in `chiffrage/decisions.md`. Choose:
   report, an export, an invoice), EQ (queries: a search, a display), ILF
   (groups of data the app maintains: users, bookings), EIF (data maintained
   by another system and only read: the payment provider's transactions, an
-  ERP catalogue). Give a count per type (average weight) or
+  ERP catalogue). With a domain model (`ddd/modele.json`), count one ILF
+  per aggregate of the model-driven contexts and one EIF per external
+  context of `ddd/contextes.json`. Give a count per type (average weight) or
   `{"low", "avg", "high"}`. Weights: EI 3/4/6, EO 4/5/7, EQ 3/4/6,
   ILF 7/10/15, EIF 5/7/10. Adjust with `vaf` (0.65–1.35) or the 14 `gsc`
   ratings (0–5). Productivity `hours_per_fp`: about 10 h/FP in the course —

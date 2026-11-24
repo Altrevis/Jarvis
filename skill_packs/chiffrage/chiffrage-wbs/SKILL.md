@@ -21,7 +21,9 @@ claires ». Write the data only; `chiffrage.py` computes and draws.
 
 Read `CLAUDE.md` and, when they exist, the project sheet (fiche projet) and
 `scrum/cahier-des-charges.json` (scope, out of scope, constraints),
-`scrum/product-backlog.json` (epics and stories), `scrum/risques.json`.
+`scrum/product-backlog.json` (epics and stories), `scrum/risques.json`,
+and the domain model of the ddd pack: `ddd/domaine.json` (subdomains) and
+`ddd/contextes.json` (bounded contexts, context map).
 If `chiffrage/wbs.json` exists, **update it**: keep the ids, never renumber.
 
 ## What a WBS is
@@ -73,6 +75,23 @@ goes into **exactly one** work package (`stories`). A package may hold
 several stories (the payment and the refund stories in "Paiement"); a story
 too big for one package is split in the backlog first. `wont` items belong
 in `exclusions`. The checker lists stories in no package.
+
+## Domain model link
+
+When `ddd/contextes.json` exists, the code will be built context by
+context, so the breakdown follows it:
+
+- a work package stays inside **one bounded context** (the checker warns
+  when its stories belong to two); where an epic spans two contexts, split
+  it into one package per context;
+- a **generic subdomain** bought or taken open source (`buy`,
+  `open-source` in `ddd/domaine.json`) is an *integration* package (set-up,
+  configuration, the adapter), not a build — say it in the assumptions; its
+  licence goes in the budget, the build-or-buy comparison in the TCO;
+- each **anticorruption layer** of the context map is a package of its own
+  (the adapter that translates the external model, with its tests);
+- the core domain's packages carry the most uncertainty: give them the
+  explicit assumptions.
 
 ## Dependencies
 

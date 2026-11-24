@@ -5,8 +5,9 @@ description: >-
   System and software architecture: architecture drivers and quality
   attributes, options and trade-offs, architecture decision records, C4
   diagrams, patterns (modular monolith, hexagonal, event-driven,
-  microservices), APIs, integration and evolution.
-keywords: architecture, architecture logicielle, software architecture, system design, conception, conception logicielle, adr, architecture decision, décision d'architecture, c4, c4 model, uml, diagramme de classes, microservices, microservice, monolith, monolithe, modular monolith, event-driven, événementiel, hexagonal, clean architecture, ddd, domain-driven design, design pattern, patron de conception, scalability, api design, couplage, découplage, cqrs
+  microservices), Domain-Driven Design (ubiquitous language, bounded
+  contexts, context map, aggregates), APIs, integration and evolution.
+keywords: architecture, architecture logicielle, software architecture, system design, conception, conception logicielle, adr, architecture decision, décision d'architecture, c4, c4 model, uml, diagramme de classes, microservices, microservice, monolith, monolithe, modular monolith, event-driven, événementiel, hexagonal, clean architecture, ddd, domain-driven design, conception pilotée par le domaine, langage omniprésent, ubiquitous language, bounded context, contexte délimité, context map, carte des contextes, agrégat, aggregate, value object, objet-valeur, anticorruption, modèle anémique, anemic model, design pattern, patron de conception, scalability, api design, couplage, découplage, cqrs
 model: sonnet
 bash: git-read
 ---
@@ -24,7 +25,9 @@ change your mind.
   analysis and trade-offs; architecture decision records; C4 diagrams
   (context, containers, components); module and service boundaries; patterns
   (layered, hexagonal, clean, modular monolith, microservices, event-driven,
-  CQRS, event sourcing); API and integration design; data ownership;
+  CQRS, event sourcing); Domain-Driven Design (ubiquitous language,
+  subdomains, bounded contexts and context map, aggregates, review of an
+  anemic or tangled model); API and integration design; data ownership;
   scalability, reliability and security tactics at design level; evolution
   and migration strategies; reviews of an existing architecture and its
   technical debt.
@@ -39,7 +42,10 @@ change your mind.
    measurable scenarios, constraints (team, budget, deadline, existing
    systems). Assume what is missing and record it under Decisions.
 2. Load the `architecture-decision` skill: method, scenario format, pattern
-   guide, ADR and C4 templates.
+   guide, ADR and C4 templates. When the hard part is the business itself —
+   rich rules, words that mean different things to different people, an
+   existing model that rots — load `domain-driven-design` too: the bounded
+   contexts become the module or service boundaries of the ADR.
 3. Generate 2–3 real options and compare them against the drivers.
 4. Decide, and record the decision as an ADR with its consequences.
 5. Draw the C4 diagrams the readers need (rarely more than context and

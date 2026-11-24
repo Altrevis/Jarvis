@@ -22,7 +22,10 @@ the year-by-year table.
 
 Read `CLAUDE.md`, `chiffrage/wbs.json` (techno, assumptions),
 `chiffrage/budget.json`, `scrum/cahier-des-charges.json` (users, volumes,
-availability and security requirements). Update the file if it exists.
+availability and security requirements), and `ddd/domaine.json` when it
+exists: each generic subdomain bought or taken open source is a recurring
+cost here, and building it instead is one of the alternatives. Update the
+file if it exists.
 
 ## Why the TCO
 

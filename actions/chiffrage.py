@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from actions.project import _STEP_FINAL, _assistant_name, _config, _now, _step_status
+from actions.project import _STEP_FINAL, _assistant_name, _config, _denied, _now, _step_status
 from core import claude
 
 if getattr(sys, "frozen", False):
@@ -134,20 +134,19 @@ def _agent_system(name: str, language: str, final: str) -> str:
     return (
         f"\n\nYou are working for {_assistant_name()}, a voice assistant, on the chiffrage "
         f"(estimate and costing) of \"{name}\" in the current directory; its brief is in "
-        f"CLAUDE.md and its Scrum deliverables are in scrum/. Nobody can answer questions "
-        f"while you work: make reasonable choices, note each one in chiffrage/decisions.md, "
-        f"and finish.\n"
+        f"CLAUDE.md, its Scrum deliverables are in scrum/ and its domain model, when there "
+        f"is one, in ddd/. Nobody can answer questions while you work: make reasonable "
+        f"choices, note each one in chiffrage/decisions.md, and finish.\n"
         f"Write only in chiffrage/: the file of your skill and chiffrage/decisions.md. Never "
-        f"edit scrum/ or .claude/chiffrage-kit/chiffrage.py, and never do the arithmetic "
+        f"edit scrum/, ddd/ or .claude/chiffrage-kit/chiffrage.py, and never do the arithmetic "
         f"yourself: chiffrage.py computes every figure.\n"
         f"Keep token use low. Read only the files this step needs; do not re-read a file "
         f"you already have; do not paste file contents into your messages.\n"
         f"Run the calculator with these exact commands, each on its own: "
         f"`python3 .claude/chiffrage-kit/chiffrage.py . --check` to check, "
-        f"`python3 .claude/chiffrage-kit/chiffrage.py .` to compute (`python` on Windows) — "
-        f"never in a loop or a script: shell loops are refused. If a command is refused, "
-        f"finish the files anyway: the assistant runs the same check after you and sends "
-        f"any error back to be fixed.\n"
+        f"`python3 .claude/chiffrage-kit/chiffrage.py .` to compute (`python` on Windows). "
+        f"The assistant runs the same check after you, sends any error back to be fixed "
+        f"and computes livrables/chiffrage.md itself.\n"
         f"{lang_line}{final}")
 
 
@@ -231,6 +230,8 @@ def run_step(path: Path, name: str, step: str, language: str, progress,
                tokens=res.tokens_in + res.tokens_out + fix_tokens,
                cached=res.tokens_cached, minutes=round(res.duration_s / 60, 1),
                checked=not left)
+    if _denied(res):
+        rec["denied"] = _denied(res)
     _record(path, step, rec)
     return rec
 
