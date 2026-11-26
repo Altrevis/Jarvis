@@ -43,7 +43,9 @@ WHAT IT COSTS, AND HOW THAT STAYS UNDER CONTROL
       every step already done in its folder is skipped;
     - it stops cleanly after the step in progress — on the STOP button, when
       Claude reaches its usage limit, or when a step the next ones build on
-      is left partial.
+      is left partial;
+    - a project already made is changed part by part (modify): one agent run
+      on the part named, never the chain again.
 
 NOT A TOOL
     No TOOL dict: the page is the way in, and the voice session does not pay
@@ -277,6 +279,7 @@ def launch(form: dict, player=None) -> tuple[bool, str]:
         stop = threading.Event()
         _active[slug] = stop
     resumed = bool(state)
+    old_brief = state.get("brief", "")
     state.update(name=state.get("name") or name, slug=slug, phases=phases,
                  language=str(form.get("language") or "French"), mode=mode,
                  status="running", current="", note="", started=_now())
@@ -291,12 +294,17 @@ def launch(form: dict, player=None) -> tuple[bool, str]:
     if _one_line(answers.get("equipe")):
         state["team"] = _one_line(answers["equipe"])
     _save(path, state)
+    synced = _sync_brief(slug, old_brief, brief) if brief and old_brief and brief != old_brief else []
 
     jobs.start(player, f"DIRECTION — {state['name'][:28]}",
                lambda progress: _work(player, path, slug, stop, progress))
     what = " → ".join(LABELS[p].split(" (")[0].lower() for p in phases)
-    return True, (f"{'Reprise' if resumed else 'Lancement'} : {what}. Tu peux quitter cette "
-                  f"page, le suivi continue ici et dans la barre des tâches.")
+    msg = (f"{'Reprise' if resumed else 'Lancement'} : {what}. Tu peux quitter cette "
+           f"page, le suivi continue ici et dans la barre des tâches.")
+    if synced:
+        msg += (" Brief mis à jour pour la suite — ce qui est déjà produit ne change pas : "
+                "pour ça, MODIFIER CE PROJET.")
+    return True, msg
 
 
 def request_stop(name: str) -> bool:
@@ -544,17 +552,24 @@ def _deck_sources(path: Path, slug: str) -> str:
             + "\n\n".join(parts) + "\n")
 
 
-def _phase_presentation(player, path: Path, state: dict, stop, progress) -> dict:
-    if state.get("deck") and Path(state["deck"]).is_file():
+def _phase_presentation(player, path: Path, state: dict, stop, progress,
+                        change: str = "") -> dict:
+    """The deck — made once; `change` (MODIFIER CE PROJET) makes it again
+    with the user's correction."""
+    if not change and state.get("deck") and Path(state["deck"]).is_file():
         return {"status": "done", "note": Path(state["deck"]).name}
     _guard(stop)
-    _set(path, current="presentation · deck")
+    if not change:
+        _set(path, current="presentation · deck")
     lang = state["language"]
     request = (f"La présentation de soutenance du projet « {state['name']} » devant un jury : "
                f"le besoin, la solution et son périmètre, le modèle du domaine quand les sources "
                f"en ont un (le cœur du domaine, la carte des contextes, le langage commun), le "
                f"chiffrage (charge, délai, budget, TCO), les risques et le planning, puis l'état "
                f"du produit. Elle suit le pitch des sources et en reprend les chiffres tels quels.")
+    if change:
+        request += (f" Une version précédente existe déjà ; l'utilisateur demande ce changement, "
+                    f"qui prime sur le reste : {change}")
     sources = _deck_sources(path, state["slug"])
     out = web = preview = None
     if claude.enabled():
@@ -625,6 +640,266 @@ def _work(player, path: Path, slug: str, stop: threading.Event, progress) -> str
             f"display):\n{text[:1200]}\nTell the user in two sentences, in their language.")
 
 
+# ── Earlier projects: reopen one, change it ──────────────────────────────────
+#
+# A relaunch never redoes a step that is done (that is what keeps a resumed
+# run cheap), so changing a finished project cannot go through it. A change is
+# one agent run on the part it concerns, in that part's folder, followed by the
+# same check the step had — the scrum and project tools' own `task` runs for
+# the Scrum file and the code, the same kind of run here for the domain model
+# and the estimate, the deck made again with the change. Nothing else is
+# redone: a change of scope is asked of each part that should follow it.
+
+MODIFY_TARGETS = {
+    "scrum": "Dossier Scrum & cahier des charges",
+    "ddd": "Modèle du domaine",
+    "chiffrage": "Chiffrage",
+    "code": "Code",
+    "presentation": "Présentation",
+}
+
+
+def projects() -> list[dict]:
+    """Every Direction Projet run on this machine, most recently changed first."""
+    root = _root()
+    with _lock:
+        running = set(_active)
+    out = []
+    for d in sorted(root.iterdir()) if root.is_dir() else ():
+        state = _load(d) if d.is_dir() else {}
+        if not state.get("name"):
+            continue
+        slug = state.get("slug") or d.name
+        out.append({"name": state["name"], "slug": slug,
+                    "status": _shown_status(state.get("status", ""), slug in running),
+                    "updated": state.get("updated", ""), "created": state.get("created", ""),
+                    "phases": list(state.get("phases") or ())})
+    out.sort(key=lambda p: p["updated"], reverse=True)
+    return out
+
+
+def form_of(slug: str) -> dict:
+    """What the page needs to show a saved project again: {} when none."""
+    state = _load(_root() / slug) if slug else {}
+    if not state.get("name"):
+        return {}
+    return {"name": state["name"], "language": state.get("language") or "French",
+            "mode": state.get("mode") or "libre", "brief": state.get("brief", ""),
+            "answers": dict(state.get("answers") or {}),
+            "phases": list(state.get("phases") or PHASES)}
+
+
+def modifiable(state: dict) -> list[str]:
+    """The parts of this project that exist, so can be changed."""
+    slug = state.get("slug", "")
+    if not slug:
+        return []
+    ws, pdir = _scrum_dir(slug), _project_dir(slug)
+    scrum_steps = ((scrum._load(ws) or {}).get("steps") or {})
+    code_steps = ((project._load(pdir) or {}).get("steps") or {})
+    found = {
+        "scrum": any((r or {}).get("status") in ("done", "partial") for r in scrum_steps.values()),
+        "ddd": any(ddd.done(ws, s) for s in ddd.STEPS),
+        "chiffrage": any(chiffrage.done(ws, s) for s in chiffrage.STEPS),
+        "code": any((r or {}).get("status") in ("done", "partial") for r in code_steps.values()),
+        "presentation": bool(state.get("deck")) and Path(state["deck"]).is_file(),
+    }
+    return [k for k in MODIFY_TARGETS if found[k]]
+
+
+def modify(name: str, target: str, request: str, player=None) -> tuple[bool, str]:
+    """Change one part of a project already made. (started, message for the page)."""
+    slug = _slug(name) if name.strip() else ""
+    path = _root() / slug if slug else None
+    state = _load(path) if path else {}
+    request = str(request or "").strip()
+    if not state:
+        return False, "Ouvre d'abord un projet existant (MES PROJETS, en haut)."
+    if target not in MODIFY_TARGETS:
+        return False, "Choisis la partie à modifier."
+    if target not in modifiable(state):
+        return False, (f"« {MODIFY_TARGETS[target]} » n'a pas encore été produit : coche la "
+                       f"phase et relance la conception.")
+    if not request:
+        return False, "Écris ce qu'il faut changer."
+    problem = unavailable()
+    if problem:
+        return False, problem
+    with _lock:
+        if slug in _active:
+            return False, f"« {state['name']} » est déjà en cours : attends la fin."
+        stop = threading.Event()
+        _active[slug] = stop
+    changes = list(state.get("changes") or [])
+    changes.append({"at": _now(), "target": target, "request": request[:600], "status": "running"})
+    _set(path, changes=changes[-20:], current=f"modification · {MODIFY_TARGETS[target].lower()}")
+    jobs.start(player, f"DIRECTION — {state['name'][:20]} · modification",
+               lambda progress: _modify_work(path, slug, target, request, stop, player, progress))
+    return True, (f"Modification lancée sur « {MODIFY_TARGETS[target]} » : un agent, puis la "
+                  f"vérification. Tu peux quitter cette page, le suivi continue ici.")
+
+
+def _modify_work(path: Path, slug: str, target: str, request: str, stop, player,
+                 progress) -> str:
+    state = _load(path)
+    status, note = "failed", ""
+    try:
+        rec = _MODIFY[target](player, path, state, request, stop, progress)
+        status, note = rec.get("status", "done"), rec.get("note", "")
+    except _Stop as e:
+        status, note = "stopped", str(e)
+    except claude.ClaudeError as e:
+        note = f"Claude a échoué : {str(e)[:200]}"
+    except Exception as e:                           # noqa: BLE001 — reported on the page
+        note = str(e)[:240]
+        raise
+    finally:
+        with _lock:
+            _active.pop(slug, None)
+        changes = list(_load(path).get("changes") or [])
+        if changes:
+            changes[-1].update(status=status, note=str(note)[:400], finished=_now())
+        _set(path, changes=changes, current="")
+    said = {"done": "is done", "partial": "is done, with problems the check still finds",
+            "stopped": f"stopped ({note})", "failed": f"failed ({note})"}.get(status, status)
+    return (f"The change to {MODIFY_TARGETS[target]} of {state.get('name', slug)} {said}. "
+            f"{str(note)[:600]}\nTell the user in one or two sentences, in their language.")
+
+
+def _first_line(text: str, limit: int = 300) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
+def _modify_scrum(player, path: Path, state: dict, request: str, stop, progress) -> dict:
+    """The Scrum file's own task run (render check included), then the pages
+    and the cahier des charges exports drawn again."""
+    slug, lang = state["slug"], state["language"]
+    ws = _scrum_dir(slug)
+    scrum._install_pack(ws)
+    with _busy(scrum, slug):
+        _guard(stop)
+        rec = _retrying(lambda: scrum._run_one(ws, scrum._load(ws) or {}, "task", request, "",
+                                               lang, progress), stop, progress)
+    progress("scrum · drawing the deliverables")
+    scrum._render(ws)
+    if (ws / "scrum" / "cahier-des-charges.json").is_file():
+        try:
+            pdf, docx = scrum._cdc_files(ws, scrum._load(ws) or state, progress)
+            _set(path, cdc=str(pdf), cdc_docx=str(docx) if docx else "")
+        except Exception as e:                       # the JSON and the pages are there
+            print(f"[Direction] cahier des charges export failed: {e}")
+    return {"status": rec.get("status", "done"),
+            "note": rec.get("remains") or _first_line(rec.get("report"))}
+
+
+def _modify_part(module, folder: str, what: str):
+    """A change to the domain model or the estimate: one agent run in the
+    Scrum workspace on `folder`/, then every file of that folder checked and
+    corrected as its steps are, and the deliverable computed again."""
+    def run(player, path: Path, state: dict, request: str, stop, progress) -> dict:
+        slug, lang, name = state["slug"], state["language"], state["name"]
+        ws = _scrum_dir(slug)
+        module.install(ws)
+        model = module.model_for(module.STEPS[0])
+        prompt = (f"{request}\n\nThis is a change the user asked for on the {what} already "
+                  f"written in {folder}/. Read CLAUDE.md and only the {folder}/ files this change "
+                  f"touches, follow the shapes in the matching .claude/skills/{folder}-*/SKILL.md, "
+                  f"keep every id stable, and carry the change into every {folder}/ file it "
+                  f"reaches.")
+
+        def on_event(ev):
+            act = claude.tool_activity(ev)
+            if act:
+                progress(f"{folder} · {act}")
+
+        with _busy(scrum, slug):                     # the same folder as the Scrum file
+            _guard(stop)
+            res = _retrying(lambda: claude.agent(
+                prompt, model=model, cwd=ws, timeout=module._TIMEOUT, on_event=on_event,
+                append_system=module._agent_system(name, lang, project._TASK_FINAL)),
+                stop, progress)
+            left = []
+            for step in module.STEPS:
+                if (ws / folder / module.STEP_FILES[step]).is_file():
+                    errors, _ = module._fix(ws, name, lang, step, model, on_event, progress)
+                    left += errors
+            module.calc(ws)
+        if left:
+            return {"status": "partial",
+                    "note": f"{len(left)} erreur(s) que la vérification trouve encore — {left[0]}"}
+        return {"status": "done", "note": _first_line(res.text)}
+    return run
+
+
+def _modify_code(player, path: Path, state: dict, request: str, stop, progress) -> dict:
+    """The project tool's own task run, after the latest specification,
+    backlog, domain model and estimate are copied into docs/."""
+    slug, lang = state["slug"], state["language"]
+    pdir = _project_dir(slug)
+    _copy_docs(_scrum_dir(slug), pdir)
+    with _busy(project, slug):
+        _guard(stop)
+        rec = _retrying(lambda: project._run_one(pdir, project._load(pdir) or {}, "task", request,
+                                                 lang, progress), stop, progress)
+    notes = [n for n in (rec.get("remains") or _first_line(rec.get("report")),
+                         project._parity(pdir)) if n]
+    return {"status": rec.get("status", "done"), "note": " · ".join(notes)}
+
+
+def _modify_deck(player, path: Path, state: dict, request: str, stop, progress) -> dict:
+    return _phase_presentation(player, path, state, stop, progress, change=request)
+
+
+_MODIFY = {"scrum": _modify_scrum,
+           "ddd": _modify_part(ddd, "ddd", "domain model"),
+           "chiffrage": _modify_part(chiffrage, "chiffrage", "estimate"),
+           "code": _modify_code, "presentation": _modify_deck}
+
+
+def _swap_text(md: Path, old: str, new: str) -> bool:
+    """`old` replaced by `new` once in a file — False, and nothing written,
+    when the file or the text is not there (someone edited it by hand)."""
+    if not old or not md.is_file():
+        return False
+    text = md.read_text(encoding="utf-8")
+    if old not in text:
+        return False
+    md.write_text(text.replace(old, new, 1), encoding="utf-8")
+    return True
+
+
+def _sync_brief(slug: str, old: str, brief: str) -> list[str]:
+    """A brief edited on the page, into the workspaces made from the old one:
+    their CLAUDE.md, which every later step and change reads, and their
+    state. The old text is swapped in place, so the rest of each CLAUDE.md —
+    and anything added to it since — stays as it is. Returns what changed."""
+    done = []
+    ws = _scrum_dir(slug)
+    st = scrum._load(ws)
+    if st and _swap_text(ws / "CLAUDE.md", st.get("description") or old, brief):
+        st["description"] = brief
+        scrum._save(ws, st)
+        meta = ws / "scrum" / "meta.json"
+        try:
+            m = json.loads(meta.read_text(encoding="utf-8"))
+            m["description"] = brief
+            meta.write_text(json.dumps(m, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception:                            # noqa: BLE001 — the cover keeps the old line
+            pass
+        done.append("scrum")
+    pdir = _project_dir(slug)
+    ps = project._load(pdir)
+    if ps:
+        # The code's brief is the page's brief plus the note on docs/ (_DOCS_NOTE).
+        desc = ps.get("description", "")
+        head = desc.split("\n\n## Dossier de projet")[0]
+        if _swap_text(pdir / "CLAUDE.md", head, brief):
+            ps["description"] = brief + desc[len(head):]
+            project._save(pdir, ps)
+            done.append("code")
+    return done
+
+
 # ── Following a run ──────────────────────────────────────────────────────────
 
 _MARK = {"done": "✓", "partial": "~", "failed": "✕", "running": "⟳"}
@@ -684,12 +959,30 @@ def follow(name: str) -> dict:
     return _follow(_slug(name) if name.strip() else "")
 
 
+_INTERRUPTED = ("interrompu : Jarvis a été fermé pendant le travail — REPRENDRE continue "
+                "là où il en était")
+
+
+def _shown_status(status: str, running: bool) -> str:
+    """A state still at 'running' with no job behind it was cut short by
+    Jarvis closing: shown as stopped, never as a run that is going on."""
+    return "running" if running else ("stopped" if status == "running" else status)
+
+
 def _follow(slug: str) -> dict:
     state = _load(_root() / slug) if slug else {}
     with _lock:
         running = slug in _active
     if not state:
         return {"exists": False, "running": False, "phases": [], "outputs": {}}
+    if not running and state.get("status") == "running":
+        state = dict(state, status="stopped", current="", note=_INTERRUPTED)
+    elif not running and state.get("current"):
+        state = dict(state, current="")
+    changes = [dict(c) for c in (state.get("changes") or [])[-5:]]
+    for c in changes:
+        if not running and c.get("status") == "running":
+            c.update(status="stopped", note=_INTERRUPTED.split(" — ")[0])
     phases = []
     for key in PHASES:
         steps = _phase_steps(key, state)
@@ -699,7 +992,8 @@ def _follow(slug: str) -> dict:
     return {"exists": True, "running": running,
             "status": "running" if running else state.get("status", ""),
             "current": state.get("current", ""), "note": state.get("note", ""),
-            "phases": phases, "outputs": outputs(state), "updated": state.get("updated", "")}
+            "phases": phases, "outputs": outputs(state), "updated": state.get("updated", ""),
+            "modifiable": modifiable(state), "changes": changes}
 
 
 def summary(path: Path) -> str:

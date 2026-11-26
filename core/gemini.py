@@ -177,6 +177,24 @@ _LADDERS = {
              "gemini-3.1-flash-lite", "gemini-flash-latest"),
 }
 
+# Audio in, a transcription out (actions/lecture.py, « Écoute le cours »).
+# REST models only: a Live one-shot turn takes no audio file. Reached through
+# direct(), never through Claude — Claude takes no audio, and this feature
+# stays on Gemini. Measured 2026-11-26 on French speech:
+#     gemini-3.1-flash-lite   3.5 min in 4-5 s, complete; a 20 s segment with
+#                             two voices complete and word-for-word the same
+#                             three times out of three at temperature 0
+#     gemini-3.5-flash-lite   as fast, but kept only the first sentence of
+#                             that 20 s segment three times out of three, and
+#                             twice wrote a passage nobody said — left OUT:
+#                             a lecture with a gap that says so is better
+#                             than one with an invented paragraph in it
+#     gemini-3.5-flash        504 after 89 s; 3.8 / 3.7-flash, flash-latest 503
+# The larger models stay behind for the day the lite one is out of quota.
+AUDIO = "audio"
+_LADDERS[AUDIO] = ("gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash",
+                   "gemini-3.7-flash", "gemini-flash-latest")
+
 # The conversation's own model, and ONE careful fallback behind it.
 #
 # Deliberately not a long ladder. The Live quota is not the one that runs out —
@@ -771,6 +789,15 @@ def _gemini_call(contents, tier: str, config, timeout_ms: int, key: str):
             else:
                 print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
     return None
+
+
+def direct(contents, tier: str = AUDIO, config=None,
+           timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "") -> str:
+    """Gemini and nothing else — no free gateway, no Claude in front of it —
+    reduced to the reply text; '' when no model of the ladder answered. For
+    what only Gemini takes (audio) or what must stay on Gemini."""
+    resp = _gemini_call(contents, tier, config, timeout_ms, key)
+    return (getattr(resp, "text", None) or "").strip() if resp is not None else ""
 
 
 def text(contents, tier: str = FAST, config=None,

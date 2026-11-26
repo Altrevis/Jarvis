@@ -29,6 +29,8 @@ memory/*.db
 memory/long_term.backup.json
 # Tokens spent per engine per day (core/usage.py)
 config/usage.json
+# Tokens spent since the last /compact (core/usage.py)
+config/compact.json
 
 # ── Python build noise ────────────────────────────────────────────────────────
 __pycache__/

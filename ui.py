@@ -2071,6 +2071,81 @@ class ConfirmBanner(_HudOverlay):
         no.setFocus()
 
 
+class CompactBanner(_HudOverlay):
+    """The /compact question, every `usage.compact_every()` tokens.
+
+    Nothing waits on it: the conversation goes on while it is up, and « plus
+    tard » only means the next question comes another 400 000 tokens on."""
+
+    answered = pyqtSignal(bool)        # True: compact now
+    _OW = 440
+
+    def __init__(self, since: int, every: int, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            CompactBanner {{
+                background: rgba(0, 6, 10, 248);
+                border: 1px solid {C.PRI};
+                border-radius: 6px;
+            }}
+        """)
+        self.setFixedWidth(self._OW)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(8)
+
+        def _label(text: str, size: int, color: str, bold: bool = False) -> QLabel:
+            w = QLabel(text)
+            w.setWordWrap(True)
+            w.setFont(QFont("Courier New", size, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+            w.setStyleSheet(f"color: {color}; background: transparent;")
+            lay.addWidget(w)
+            return w
+
+        _label("◈  /COMPACT", 11, C.PRI, bold=True)
+        self._title = _label("", 10, C.TEXT, bold=True)
+        self.set_count(since)
+        _label(f"Compacter résume la conversation et la reprend dans une session neuve : "
+               f"chaque échange coûte alors bien moins de tokens. Rien d'autre n'est perdu — "
+               f"mémoire, projets et tâches en cours restent. La question revient tous les "
+               f"{every // 1000}k tokens ; tape /compact dans le chat quand tu veux.",
+               8, C.TEXT_MED)
+
+        row = QHBoxLayout(); row.setSpacing(8)
+        yes = QPushButton("▸  COMPACTER")
+        yes.setFixedHeight(32)
+        yes.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        yes.setCursor(Qt.CursorShape.PointingHandCursor)
+        yes.setStyleSheet(f"""
+            QPushButton {{ background: {C.PRI_GHO}; color: {C.PRI};
+                border: 1px solid {C.PRI}; border-radius: 3px; }}
+            QPushButton:hover {{ background: {C.PRI}; color: {C.BG}; }}
+        """)
+        yes.clicked.connect(lambda: self.answered.emit(True))
+        row.addWidget(yes)
+        later = QPushButton("PLUS TARD")
+        later.setFixedHeight(32)
+        later.setFont(QFont("Courier New", 9))
+        later.setCursor(Qt.CursorShape.PointingHandCursor)
+        later.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.TEXT_MED};
+                border: 1px solid {C.BORDER}; border-radius: 3px; }}
+            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
+        """)
+        later.clicked.connect(lambda: self.answered.emit(False))
+        row.addWidget(later)
+        lay.addLayout(row)
+        # Placed by hand, in no layout: adjustSize() alone reads the wrapped
+        # labels' one-line height and clips the text. Ask for the height the
+        # layout needs at this width instead.
+        self.setMinimumHeight(lay.totalHeightForWidth(self._OW))
+
+    def set_count(self, since: int) -> None:
+        """A banner still up when the next threshold passes shows the new total."""
+        self._title.setText(f"{since / 1000:.0f}k tokens consommés depuis le dernier /compact.")
+
+
 class AudioDeviceOverlay(_HudOverlay):
     """Choose which microphone JARVIS listens to and which speakers it uses.
 
@@ -2201,15 +2276,23 @@ class AudioDeviceOverlay(_HudOverlay):
 
 
 class MemoryOverlay(_HudOverlay):
-    """Everything JARVIS has stored about you, and when it learned it.
+    """Everything JARVIS has stored about you, field by field.
 
     Memory used to be a 2200-character store that deleted its oldest entries
     when full and mentioned it only on stdout. The cap is gone; this panel is
     the other half of that change — a memory you cannot inspect is a memory you
-    cannot trust, and 'delete' has to be something the person can do."""
+    cannot trust, and 'delete' has to be something the person can do.
 
-    reset_done = pyqtSignal(int)   # facts erased by RESET ALL
-    _OW = 520
+    2026-11-26: RESET ALL was the only bulk action, so the panel now opens on
+    the fields. One can be picked (the list shows only its facts), made,
+    emptied or removed, and a fact added or corrected by hand in any of them.
+    Any field can be deleted — the ✕ on its chip — built-in ones included.
+    Everything is a rebuild of the panel; what was typed in the form survives
+    it in self._draft."""
+
+    reset_done   = pyqtSignal(int)              # facts erased by RESET ALL
+    field_erased = pyqtSignal(str, int, bool)   # (field label, facts erased, field deleted)
+    _OW = 600
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2222,15 +2305,105 @@ class MemoryOverlay(_HudOverlay):
             }}
         """)
         self.setFixedWidth(self._OW)
-        # RESET ALL takes two clicks: the first only turns the button into a
-        # question. Erasing everything a person has told the assistant is not
-        # something one stray click should do.
-        self._confirm_reset = False
+        self._field = ""          # the field shown; "" = every field
+        # A bulk erase takes two clicks: the first only turns the button into a
+        # question. "empty" empties the field shown, "delete" removes it,
+        # "reset" erases everything.
+        self._confirm = ""
+        self._new_field = False   # the « new field » row is open
+        self._edit = None         # (field, key) of the fact being corrected
+        self._draft = {"key": "", "value": "", "cat": "", "field": ""}
+        self._error = ""
+        self._inputs: dict = {}   # the form's widgets, read back before a rebuild
 
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(20, 16, 20, 16)
         self._lay.setSpacing(5)
         self._rebuild()
+
+    @staticmethod
+    def _label(key: str) -> str:
+        from memory.memory_manager import field_label
+        return field_label(key)
+
+    # ── Small builders ──
+    @staticmethod
+    def _css(kind: str) -> str:
+        base = "border-radius: 3px; padding: 0 8px;"
+        return {
+            "dim": f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; "
+                   f"border: 1px solid {C.BORDER}; {base} }}"
+                   f"QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}",
+            "pri": f"QPushButton {{ background: transparent; color: {C.PRI}; "
+                   f"border: 1px solid {C.PRI_DIM}; {base} }}"
+                   f"QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}",
+            "red": f"QPushButton {{ background: transparent; color: {C.TEXT_DIM}; "
+                   f"border: 1px solid {C.BORDER}; {base} }}"
+                   f"QPushButton:hover {{ color: {C.RED}; border-color: {C.RED}; }}",
+            "danger": f"QPushButton {{ background: transparent; color: {C.RED}; "
+                      f"border: 1px solid {C.RED}; {base} }}"
+                      f"QPushButton:hover {{ background: rgba(255,51,85,40); }}",
+            "chip": f"QPushButton {{ background: transparent; color: {C.TEXT_MED}; "
+                    f"border: 1px solid {C.BORDER}; {base} }}"
+                    f"QPushButton:hover {{ color: {C.PRI}; border-color: {C.BORDER_B}; }}"
+                    f"QPushButton:checked {{ background: {C.PRI_GHO}; color: {C.PRI}; "
+                    f"border-color: {C.PRI}; }}",
+        }[kind]
+
+    def _btn(self, text: str, kind: str = "dim", h: int = 26, bold: bool = False,
+             tip: str = "") -> QPushButton:
+        b = QPushButton(text.replace("&", "&&"))       # a lone & is a Qt mnemonic
+        b.setFixedHeight(h)
+        b.setFont(QFont("Courier New", 8, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(self._css(kind))
+        if tip:
+            b.setToolTip(tip)
+        return b
+
+    def _mini(self, text: str, tip: str, hover: str) -> QPushButton:
+        b = QPushButton(text)
+        b.setFixedSize(20, 20)
+        b.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setToolTip(tip)
+        b.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.TEXT_DIM};
+                border: 1px solid {C.BORDER}; border-radius: 3px; }}
+            QPushButton:hover {{ color: {hover}; border-color: {hover}; }}
+        """)
+        return b
+
+    @staticmethod
+    def _lbl(text: str, size: int = 8, color: str = "", bold: bool = False) -> QLabel:
+        w = QLabel(text)
+        w.setWordWrap(True)
+        w.setFont(QFont("Courier New", size, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+        w.setStyleSheet(f"color: {color or C.TEXT_MED}; background: transparent;")
+        return w
+
+    @staticmethod
+    def _line(text: str, placeholder: str) -> QLineEdit:
+        w = QLineEdit(text)
+        w.setPlaceholderText(placeholder)
+        w.setFont(QFont("Courier New", 9))
+        w.setFixedHeight(28)
+        w.setStyleSheet(
+            f"QLineEdit {{ background: #000d12; color: {C.TEXT}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 3px; padding: 3px 6px; }}"
+            f"QLineEdit:focus {{ border-color: {C.PRI}; }}")
+        return w
+
+    def _row(self, *widgets, stretch_first: bool = False) -> None:
+        """Widgets side by side, in a holder widget (so _clear_layout frees them)."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        for i, w in enumerate(widgets):
+            row.addWidget(w, 1 if (stretch_first and i == 0) else 0)
+        holder = QWidget()
+        holder.setLayout(row)
+        self._lay.addWidget(holder)
 
     def _clear_layout(self):
         """Take every item out of the layout and detach it from the widget tree
@@ -2297,144 +2470,37 @@ class MemoryOverlay(_HudOverlay):
     def _rebuild(self):
         before = self.geometry()
         self._clear_layout()
+        self._inputs = {}
 
-        from memory.memory_manager import all_entries_for_ui
+        from memory.memory_manager import all_entries_for_ui, list_fields
 
-        hdr = QLabel("🧠  WHAT JARVIS REMEMBERS")
-        hdr.setFont(QFont("Courier New", 12, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        self._lay.addWidget(hdr)
+        fields = list_fields()
+        if self._field and self._field not in {f["key"] for f in fields}:
+            self._field = ""
+        rows = all_entries_for_ui()
+        shown = [r for r in rows if not self._field or r["category"] == self._field]
 
+        self._lay.addWidget(self._lbl("🧠  MÉMOIRE DE JARVIS", 12, C.PRI, bold=True))
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         self._lay.addWidget(sep)
+        self._lay.addWidget(self._lbl(
+            f"{len(rows)} fait{'s' if len(rows) != 1 else ''}, rangés par champ — dans "
+            f"memory/long_term.json, sur cette machine : rien n'est envoyé ailleurs.",
+            7, C.TEXT_DIM))
 
-        rows = all_entries_for_ui()
+        self._build_fields(fields, len(rows))
+        if self._error:
+            self._lay.addWidget(self._lbl(self._error, 8, C.RED))
+        self._build_list(shown)
+        self._build_form(fields)
+        self._build_bulk(shown, len(rows))
 
-        cap = QLabel(f"{len(rows)} stored facts — newest first. "
-                     f"Nothing here is sent anywhere; it lives in "
-                     f"memory/long_term.json on this machine.")
-        cap.setWordWrap(True)
-        cap.setFont(QFont("Courier New", 7))
-        cap.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
-        self._lay.addWidget(cap)
-
-        if not rows:
-            empty = QLabel("Nothing stored yet.")
-            empty.setFont(QFont("Courier New", 9))
-            empty.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
-            self._lay.addWidget(empty)
-        else:
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFixedHeight(min(420, 34 * len(rows) + 10))
-            scroll.setStyleSheet(
-                f"QScrollArea {{ border: 1px solid {C.BORDER}; border-radius: 3px; "
-                f"background: transparent; }}"
-            )
-            inner = QWidget()
-            ilay  = QVBoxLayout(inner)
-            ilay.setContentsMargins(6, 6, 6, 6)
-            ilay.setSpacing(3)
-
-            for r in rows:
-                line = QHBoxLayout(); line.setSpacing(6)
-                txt = QLabel(f"<b>{r['key'].replace('_', ' ')}</b> "
-                             f"<span style='color:{C.TEXT_MED}'>— {r['value']}</span>")
-                txt.setWordWrap(True)
-                txt.setFont(QFont("Courier New", 8))
-                txt.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
-                line.addWidget(txt, 1)
-
-                meta = QLabel(f"{r['category'][:4]} · {r['updated'] or '—'}")
-                meta.setFont(QFont("Courier New", 7))
-                meta.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
-                line.addWidget(meta)
-
-                rm = QPushButton("✕")
-                rm.setFixedSize(20, 20)
-                rm.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-                rm.setCursor(Qt.CursorShape.PointingHandCursor)
-                rm.setToolTip("Forget this")
-                rm.setStyleSheet(f"""
-                    QPushButton {{ background: transparent; color: {C.TEXT_DIM};
-                        border: 1px solid {C.BORDER}; border-radius: 3px; }}
-                    QPushButton:hover {{ color: {C.RED}; border-color: {C.RED}; }}
-                """)
-                rm.clicked.connect(
-                    lambda _=False, c=r["category"], k=r["key"]: self._forget(c, k))
-                line.addWidget(rm)
-
-                holder = QWidget()
-                holder.setLayout(line)
-                ilay.addWidget(holder)
-
-            ilay.addStretch()
-            scroll.setWidget(inner)
-            self._lay.addWidget(scroll)
-
-        if rows and not self._confirm_reset:
-            reset = QPushButton("⟲  RESET ALL MEMORY")
-            reset.setFixedHeight(28)
-            reset.setFont(QFont("Courier New", 8))
-            reset.setCursor(Qt.CursorShape.PointingHandCursor)
-            reset.setToolTip("Forget every fact and every session summary")
-            reset.setStyleSheet(f"""
-                QPushButton {{ background: transparent; color: {C.TEXT_DIM};
-                    border: 1px solid {C.BORDER}; border-radius: 3px; }}
-                QPushButton:hover {{ color: {C.RED}; border-color: {C.RED}; }}
-            """)
-            reset.clicked.connect(lambda: self._ask_reset(True))
-            self._lay.addWidget(reset)
-        elif rows:
-            warn = QLabel(f"Erase all {len(rows)} facts and the session summaries? "
-                          f"JARVIS reconnects with an empty memory. A copy of the "
-                          f"current file is kept as memory/long_term.backup.json.")
-            warn.setWordWrap(True)
-            warn.setFont(QFont("Courier New", 8))
-            warn.setStyleSheet(f"color: {C.RED}; background: transparent;")
-            self._lay.addWidget(warn)
-
-            row = QHBoxLayout(); row.setSpacing(8)
-            yes = QPushButton("▸  ERASE EVERYTHING")
-            yes.setFixedHeight(30)
-            yes.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
-            yes.setCursor(Qt.CursorShape.PointingHandCursor)
-            yes.setStyleSheet(f"""
-                QPushButton {{ background: transparent; color: {C.RED};
-                    border: 1px solid {C.RED}; border-radius: 3px; }}
-                QPushButton:hover {{ background: rgba(255,51,85,40); }}
-            """)
-            yes.clicked.connect(self._reset_all)
-            row.addWidget(yes)
-
-            keep = QPushButton("KEEP")
-            keep.setFixedHeight(30)
-            keep.setFont(QFont("Courier New", 9))
-            keep.setCursor(Qt.CursorShape.PointingHandCursor)
-            keep.setStyleSheet(f"""
-                QPushButton {{ background: transparent; color: {C.TEXT_MED};
-                    border: 1px solid {C.BORDER}; border-radius: 3px; }}
-                QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
-            """)
-            keep.clicked.connect(lambda: self._ask_reset(False))
-            row.addWidget(keep)
-            holder = QWidget()
-            holder.setLayout(row)
-            self._lay.addWidget(holder)
-            # Enter on an unread question keeps the memory.
-            keep.setDefault(True)
-            keep.setFocus()
-
-        close = QPushButton("CLOSE")
-        close.setFixedHeight(30)
-        close.setFont(QFont("Courier New", 9))
-        close.setCursor(Qt.CursorShape.PointingHandCursor)
-        close.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: {C.TEXT_MED};
-                border: 1px solid {C.BORDER}; border-radius: 3px; }}
-            QPushButton:hover {{ color: {C.TEXT}; border-color: {C.BORDER_B}; }}
-        """)
+        self._lay.addWidget(self._lbl(
+            "Jarvis retrouve un fait ajouté ici dès qu'il cherche dans sa mémoire ; son prompt, "
+            "lui, change à la prochaine conversation — ou tout de suite avec /compact.",
+            7, C.TEXT_DIM))
+        close = self._btn("FERMER", "dim", h=30)
         close.clicked.connect(self.hide)
         self._lay.addWidget(close)
 
@@ -2444,25 +2510,305 @@ class MemoryOverlay(_HudOverlay):
         # got it right: _settle is idempotent.
         QTimer.singleShot(0, lambda g=before: self._settle(g))
 
-    def _forget(self, category: str, key: str):
+    def _build_fields(self, fields: list[dict], total: int) -> None:
+        """One chip per field (the one shown is lit), each with its ✕ to delete
+        it, then « new field »."""
+        box = QWidget()
+        grid = QGridLayout(box)
+        grid.setContentsMargins(0, 4, 0, 2)
+        grid.setSpacing(4)
+        chips = [("", f"Tous · {total}", "Tous les champs")] + [
+            (f["key"], f"{self._label(f['key'])} · {f['count']}",
+             "" if f["builtin"] else "Champ créé par toi") for f in fields]
+        for i, (key, text, tip) in enumerate(chips):
+            b = self._btn(text, "chip", h=24, tip=tip)
+            b.setCheckable(True)
+            b.setChecked(key == self._field)
+            b.clicked.connect(lambda _=False, k=key: self._pick_field(k))
+            cell = b
+            if key:
+                rm = self._mini("✕", f"Supprimer le champ « {self._label(key)} »", C.RED)
+                rm.setFixedSize(22, 24)
+                rm.clicked.connect(lambda _=False, k=key: self._ask_erase(k, "delete"))
+                cell = QWidget()
+                row = QHBoxLayout(cell)
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(2)
+                row.addWidget(b, 1)
+                row.addWidget(rm)
+            grid.addWidget(cell, i // 4, i % 4)
+        new = self._btn("＋  NOUVEAU CHAMP", "pri", h=24, tip="Créer un champ de mémoire")
+        new.clicked.connect(lambda: self._go(_new_field=not self._new_field, _error=""))
+        grid.addWidget(new, len(chips) // 4, len(chips) % 4)
+        self._lay.addWidget(box)
+        if self._confirm in ("empty", "delete") and self._field:
+            n = next((f["count"] for f in fields if f["key"] == self._field), 0)
+            self._build_field_confirm(n)
+
+        if self._new_field:
+            name = self._line(self._draft.get("field", ""),
+                              "Nom du champ (ex. Cours Ynov, Santé, Sport)")
+            name.returnPressed.connect(self._create_field)
+            self._inputs["field"] = name
+            ok = self._btn("CRÉER", "pri", h=28, bold=True)
+            ok.clicked.connect(self._create_field)
+            no = self._btn("ANNULER", "dim", h=28)
+            no.clicked.connect(lambda: self._go(_new_field=False, _error=""))
+            self._row(name, ok, no, stretch_first=True)
+            name.setFocus()
+
+    def _build_list(self, shown: list[dict]) -> None:
+        """The facts of the field shown, newest first, each with ✎ and ✕."""
+        from html import escape
+        if not shown:
+            self._lay.addWidget(self._lbl(
+                "Rien dans ce champ pour l'instant." if self._field
+                else "Rien en mémoire pour l'instant.", 9, C.TEXT_MED))
+            return
+        # The list takes the room the rest of the panel leaves in the HUD.
+        p = self.parentWidget()
+        room = (p.height() if p is not None else 700) - 400
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFixedHeight(max(96, min(300, room, 34 * len(shown) + 10)))
+        scroll.setStyleSheet(
+            f"QScrollArea {{ border: 1px solid {C.BORDER}; border-radius: 3px; "
+            f"background: transparent; }}")
+        inner = QWidget()
+        ilay = QVBoxLayout(inner)
+        ilay.setContentsMargins(6, 6, 6, 6)
+        ilay.setSpacing(3)
+        for r in shown:
+            line = QHBoxLayout()
+            line.setContentsMargins(4, 1, 4, 1)
+            line.setSpacing(6)
+            txt = QLabel(f"<b>{escape(r['key'].replace('_', ' '))}</b> "
+                         f"<span style='color:{C.TEXT_MED}'>— {escape(r['value'])}</span>")
+            txt.setWordWrap(True)
+            txt.setFont(QFont("Courier New", 8))
+            txt.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+            line.addWidget(txt, 1)
+            where = "" if self._field else f"{self._label(r['category'])} · "
+            meta = self._lbl(f"{where}{r['updated'] or '—'}", 7, C.TEXT_DIM)
+            meta.setWordWrap(False)
+            line.addWidget(meta)
+            ed = self._mini("✎", "Corriger ce fait", C.PRI)
+            ed.clicked.connect(lambda _=False, row=r: self._start_edit(row))
+            line.addWidget(ed)
+            rm = self._mini("✕", "Oublier ce fait", C.RED)
+            rm.clicked.connect(lambda _=False, c=r["category"], k=r["key"]: self._forget(c, k))
+            line.addWidget(rm)
+            holder = QWidget()
+            holder.setLayout(line)
+            if self._edit == (r["category"], r["key"]):
+                holder.setObjectName("MemEditing")
+                holder.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                holder.setStyleSheet(f"QWidget#MemEditing {{ border: 1px solid {C.PRI}; "
+                                     f"border-radius: 3px; }}")
+            ilay.addWidget(holder)
+        ilay.addStretch()
+        scroll.setWidget(inner)
+        self._lay.addWidget(scroll)
+
+    def _build_form(self, fields: list[dict]) -> None:
+        """Add a fact — or correct the one picked with ✎ — in any field."""
+        title = (f"▸ CORRIGER « {self._edit[1].replace('_', ' ')} »" if self._edit
+                 else "▸ AJOUTER UN FAIT")
+        self._lay.addWidget(self._lbl(title, 8, C.PRI_DIM, bold=True))
+        key = self._line(self._draft.get("key", ""), "Nom (ex. prénom de ma sœur)")
+        key.setFixedWidth(200)
+        val = self._line(self._draft.get("value", ""), "Ce que Jarvis retient (ex. Ayşe)")
+        val.setMaxLength(380)                 # memory_manager.MAX_VALUE_LENGTH
+        val.returnPressed.connect(self._save_fact)
+        self._row(key, val)
+
+        cat = QComboBox()
+        cat.setFont(QFont("Courier New", 8))
+        cat.setFixedHeight(28)
+        cat.setStyleSheet(
+            f"QComboBox {{ background: #000d12; color: {C.TEXT}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 3px; padding: 3px 8px; }}"
+            f"QComboBox:hover {{ border-color: {C.BORDER_B}; }}"
+            f"QComboBox QAbstractItemView {{ background: #000d12; color: {C.TEXT}; "
+            f"selection-background-color: {C.PRI_GHO}; border: 1px solid {C.BORDER}; }}")
+        for f in fields:
+            cat.addItem(self._label(f["key"]), f["key"])
+        idx = cat.findData(self._draft.get("cat") or self._field or "notes")
+        cat.setCurrentIndex(max(0, idx))
+        cat.setToolTip("Le champ où ranger ce fait")
+        save = self._btn("▸  ENREGISTRER", "pri", h=28, bold=True)
+        save.clicked.connect(self._save_fact)
+        widgets = [self._lbl("dans le champ", 8, C.TEXT_DIM), cat, save]
+        if self._edit:
+            cancel = self._btn("ANNULER", "dim", h=28)
+            cancel.clicked.connect(self._cancel_edit)
+            widgets.append(cancel)
+        self._row(*widgets)
+        widgets[0].setFixedWidth(110)
+        cat.setMinimumWidth(170)
+        self._inputs.update(key=key, value=val, cat=cat)
+
+    def _confirm_row(self, warn: str, yes: QPushButton) -> None:
+        """The second click of a bulk erase: the question, then yes / keep."""
+        self._lay.addWidget(self._lbl(warn, 8, C.RED))
+        keep = self._btn("GARDER", "dim", h=30)
+        keep.clicked.connect(lambda: self._go(_confirm=""))
+        self._row(yes, keep)
+        # Enter on an unread question keeps the memory.
+        keep.setDefault(True)
+        keep.setFocus()
+
+    def _build_field_confirm(self, n: int) -> None:
+        """Delete (or empty) the field shown? Asked right under the chips."""
+        label = self._label(self._field)
+        facts = f"{n} fait{'s' if n != 1 else ''}"
+        if self._confirm == "empty":
+            what = f"Vider « {label} » de ses {facts} ? Le champ reste, vide."
+            yes = self._btn("▸  VIDER", "danger", h=30, bold=True)
+        else:
+            what = (f"Supprimer le champ « {label} »" + (f" et ses {facts}" if n else " (il est vide)")
+                    + " ? Ce que Jarvis y aurait rangé ira dans « Notes »"
+                    + (" — recréé s'il le faut" if self._field == "notes" else "")
+                    + ". Pour le retrouver : NOUVEAU CHAMP, même nom.")
+            yes = self._btn("▸  SUPPRIMER LE CHAMP", "danger", h=30, bold=True)
+        yes.clicked.connect(lambda: self._erase_field(keep=self._confirm == "empty"))
+        self._confirm_row(f"{what} Une copie du fichier reste dans memory/long_term.backup.json.",
+                          yes)
+
+    def _build_bulk(self, shown: list[dict], total: int) -> None:
+        """Empty the field shown, or erase everything — two clicks each."""
+        label = self._label(self._field) if self._field else ""
+        if self._confirm == "reset":
+            yes = self._btn("▸  TOUT EFFACER", "danger", h=30, bold=True)
+            yes.clicked.connect(self._reset_all)
+            self._confirm_row(
+                f"Effacer les {total} faits et les résumés de session ? Jarvis repart d'une "
+                f"mémoire vide, avec ses champs de départ, dans une nouvelle conversation. Une "
+                f"copie du fichier reste dans memory/long_term.backup.json.", yes)
+            return
+
+        buttons = []
+        if self._field and shown:
+            b = self._btn(f"⟲  VIDER « {label} »", "red", h=28,
+                          tip="Oublier tous les faits de ce champ, et le garder")
+            b.clicked.connect(lambda: self._ask_erase(self._field, "empty"))
+            buttons.append(b)
+        if self._field:
+            b = self._btn(f"✕  SUPPRIMER « {label} »", "red", h=28,
+                          tip="Supprimer ce champ et ses faits")
+            b.clicked.connect(lambda: self._ask_erase(self._field, "delete"))
+            buttons.append(b)
+        if total:
+            b = self._btn("⟲  TOUT EFFACER", "red", h=28,
+                          tip="Oublier chaque fait et chaque résumé de session")
+            b.clicked.connect(lambda: self._go(_confirm="reset", _error=""))
+            buttons.append(b)
+        if buttons:
+            self._row(*buttons)
+
+    # ── Behaviour ──
+    # Every change rebuilds the panel on the NEXT event-loop turn, never inside
+    # the click handler: the rebuild destroys the very button that emitted the
+    # signal, and Qt is entitled to touch the sender after a slot returns —
+    # tearing it down mid-emission is how a widget ends up half-alive on screen.
+
+    def _keep_draft(self) -> None:
+        """What is typed in the form, kept across the rebuild about to happen."""
+        w = self._inputs
+        try:
+            for name in ("key", "value", "field"):
+                if name in w:
+                    self._draft[name] = w[name].text()
+            if "cat" in w:
+                self._draft["cat"] = w["cat"].currentData() or ""
+        except RuntimeError:            # widgets of a rebuild already under way
+            pass
+
+    def _go(self, keep: bool = True, **state) -> None:
+        if keep:
+            self._keep_draft()
+        for name, value in state.items():
+            setattr(self, name, value)
+        QTimer.singleShot(0, self._rebuild)
+
+    def _pick_field(self, key: str) -> None:
+        self._keep_draft()
+        if key and not self._edit:
+            self._draft["cat"] = key            # a fact added now goes in the field shown
+        self._go(keep=False, _field=key, _confirm="", _error="")
+
+    def _create_field(self) -> None:
+        from memory.memory_manager import create_field
+        self._keep_draft()
+        try:
+            key = create_field(self._draft.get("field", ""))
+        except ValueError as e:
+            self._go(keep=False, _error=str(e))
+            return
+        self._draft["field"] = ""
+        if not self._edit:
+            self._draft["cat"] = key
+        self._go(keep=False, _new_field=False, _field=key, _confirm="", _error="")
+
+    def _save_fact(self) -> None:
+        from memory.memory_manager import set_fact
+        self._keep_draft()
+        d = self._draft
+        try:
+            set_fact(d.get("cat") or "", d.get("key", ""), d.get("value", ""), old=self._edit)
+        except ValueError as e:
+            self._go(keep=False, _error=str(e))
+            return
+        d.update(key="", value="")
+        self._go(keep=False, _edit=None, _error="")
+
+    def _start_edit(self, row: dict) -> None:
+        self._keep_draft()
+        self._draft.update(key=row["key"].replace("_", " "), value=row["value"],
+                           cat=row["category"])
+        self._go(keep=False, _edit=(row["category"], row["key"]), _error="")
+
+    def _cancel_edit(self) -> None:
+        self._keep_draft()
+        self._draft.update(key="", value="")
+        self._go(keep=False, _edit=None, _error="")
+
+    def _forget(self, category: str, key: str) -> None:
         from memory.memory_manager import forget
         forget(key, category)
-        # Rebuild on the NEXT event-loop turn, not inside this click handler.
-        # The rebuild destroys the very ✕ button that emitted this signal, and
-        # Qt is entitled to touch the sender after a slot returns; tearing it
-        # down mid-emission is how a widget ends up half-alive on screen.
-        QTimer.singleShot(0, self._rebuild)
+        self._keep_draft()
+        if self._edit == (category, key):
+            self._draft.update(key="", value="")
+            self._edit = None
+        self._go(keep=False, _error="")
 
-    def _ask_reset(self, ask: bool):
-        self._confirm_reset = ask
-        QTimer.singleShot(0, self._rebuild)     # same reason as _forget
+    def _ask_erase(self, key: str, how: str) -> None:
+        """First click of « vider » / « supprimer »: show that field, ask."""
+        self._keep_draft()
+        if not self._edit:
+            self._draft["cat"] = key
+        self._go(keep=False, _field=key, _confirm=how, _error="")
 
-    def _reset_all(self):
+    def _erase_field(self, keep: bool = False) -> None:
+        from memory.memory_manager import delete_field
+        key = self._field
+        self._keep_draft()
+        label = self._label(key)
+        count = delete_field(key, keep=keep)
+        if self._edit and self._edit[0] == key:
+            self._draft.update(key="", value="")
+            self._edit = None
+        if not keep and self._draft.get("cat") == key:
+            self._draft["cat"] = ""
+        self.field_erased.emit(label, count, not keep)
+        self._go(keep=False, _confirm="", _error="", _field=key if keep else "")
+
+    def _reset_all(self) -> None:
         from memory.memory_manager import reset_memory
         count = reset_memory()
-        self._confirm_reset = False
+        self._draft.update(key="", value="", cat="")
         self.reset_done.emit(count)
-        QTimer.singleShot(0, self._rebuild)
+        self._go(keep=False, _confirm="", _edit=None, _field="", _error="")
 
 
 class ClaudeOverlay(_HudOverlay):
@@ -2644,7 +2990,7 @@ class ClaudeOverlay(_HudOverlay):
     def _show_usage(self):
         try:
             from core import usage
-            self._usage.setText(usage.summary_line())
+            self._usage.setText(f"{usage.summary_line()}\n{usage.compact_line()}")
         except Exception:
             self._usage.setText("")
 
@@ -3316,7 +3662,12 @@ class DirectionPage(QWidget):
     run's state files, every second and a half while it is on screen.
 
     Two ways to describe the project: a free prompt, or a questionnaire whose
-    answers actions/direction.py turns into the same brief, with no model call."""
+    answers actions/direction.py turns into the same brief, with no model call.
+
+    MES PROJETS, at the top, lists every run made here: one click puts it back
+    in the form (brief or answers, language, phases) and shows its follow-up,
+    where MODIFIER CE PROJET changes one part already produced — a relaunch
+    never redoes a step that is done."""
 
     back = pyqtSignal()
 
@@ -3380,6 +3731,7 @@ class DirectionPage(QWidget):
         scroll.setWidget(body)
         outer.addWidget(scroll, stretch=1)
 
+        self._build_projects()
         self._build_project()
         self._build_brief()
         self._build_phases()
@@ -3478,11 +3830,95 @@ class DirectionPage(QWidget):
         lay.addWidget(back)
         return w
 
-    def _build_project(self) -> None:
+    def _build_projects(self) -> None:
+        """MES PROJETS: every run made on this page, newest first, to reopen."""
         self._lay.addWidget(self._text(
             "Décris le projet une fois : Jarvis enchaîne le dossier Scrum et le cahier des "
             "charges, le modèle du domaine (DDD), le chiffrage, le code puis la présentation, "
             "chaque étape construite sur la précédente."))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        title = QLabel("▸ MES PROJETS")
+        title.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent; "
+                            f"border-bottom: 1px solid {C.BORDER}; padding: 8px 0 3px 0;")
+        row.addWidget(title, stretch=1)
+        new = QPushButton("＋  NOUVEAU PROJET")
+        new.setFixedHeight(24)
+        new.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        new.setCursor(Qt.CursorShape.PointingHandCursor)
+        new.setToolTip("Vider le formulaire pour décrire un autre projet")
+        new.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 3px; padding: 0 8px; }}
+            QPushButton:hover {{ background: {C.PRI_GHO}; border-color: {C.PRI}; }}
+        """)
+        new.clicked.connect(self._new_project)
+        row.addWidget(new, alignment=Qt.AlignmentFlag.AlignBottom)
+        self._lay.addLayout(row)
+
+        self._proj_scroll = QScrollArea()
+        self._proj_scroll.setWidgetResizable(True)
+        self._proj_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._proj_scroll.setStyleSheet(f"""
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{ background: {C.BG}; width: 6px; border: none; }}
+            QScrollBar::handle:vertical {{ background: {C.BORDER_B}; border-radius: 3px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; border: none; }}
+        """)
+        inner = QWidget()
+        inner.setObjectName("DirectionProjects")
+        inner.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        inner.setStyleSheet(f"QWidget#DirectionProjects {{ background: {C.BG}; }}")
+        self._proj_lay = QVBoxLayout(inner)
+        self._proj_lay.setContentsMargins(0, 0, 4, 0)
+        self._proj_lay.setSpacing(3)
+        self._proj_scroll.setWidget(inner)
+        self._lay.addWidget(self._proj_scroll)
+        self._proj_empty = self._text("Aucun projet pour l'instant : le premier que tu lances "
+                                      "apparaîtra ici, pour le reprendre ou le modifier.",
+                                      7, C.TEXT_DIM)
+        self._lay.addWidget(self._proj_empty)
+        self._proj_sig = None                      # what the list shows, to redraw on change only
+        self._proj_btns: dict[str, QPushButton] = {}
+
+    _PROJ_STATES = {"running": ("⟳", "en cours"), "done": ("✓", "terminé"),
+                    "partial": ("~", "partiel"), "stopped": ("■", "arrêté"),
+                    "failed": ("✕", "échec")}
+
+    @staticmethod
+    def _when(iso: str) -> str:
+        """'2026-11-24T11:02:39' -> '24/11 11:02'."""
+        return f"{iso[8:10]}/{iso[5:7]} {iso[11:16]}" if len(iso) >= 16 else iso
+
+    def _fill_projects(self, items: list[dict]) -> None:
+        sig = tuple((p["slug"], p["status"], p["updated"][:16]) for p in items)
+        if sig == self._proj_sig:
+            return
+        self._proj_sig = sig
+        while self._proj_lay.count():
+            w = self._proj_lay.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+        self._proj_btns = {}
+        for p in items:
+            mark, state = self._PROJ_STATES.get(p["status"], ("·", "brouillon"))
+            b = self._chip(f"{mark}  {p['name']}   —   {state} · {self._when(p['updated'])}"
+                           .replace("&", "&&"), left=True)
+            b.setToolTip("Rouvrir ce projet : son brief, ses phases, son suivi")
+            # Opened on the next turn: _refresh may redraw this list, and the
+            # button that was clicked must not be destroyed inside its own signal.
+            b.clicked.connect(lambda _=False, s=p["slug"]:
+                              QTimer.singleShot(0, lambda: self._open_project(s)))
+            self._proj_lay.addWidget(b)
+            self._proj_btns[p["slug"]] = b
+        self._proj_lay.addStretch()
+        self._proj_scroll.setFixedHeight(min(140, 29 * len(items) + 2))
+        self._proj_scroll.setVisible(bool(items))
+        self._proj_empty.setVisible(not items)
+
+    def _build_project(self) -> None:
         self._section("PROJET")
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -3664,8 +4100,60 @@ class DirectionPage(QWidget):
             grid.addWidget(b, i // 3, i % 3)
             self._out_btns[key] = b
         lay.addLayout(grid)
+        lay.addWidget(self._build_modify())
         self._follow_box.hide()
         self._lay.addWidget(self._follow_box)
+
+    def _build_modify(self) -> QWidget:
+        """MODIFIER CE PROJET: one part already produced, changed by one agent."""
+        self._mod_box = QWidget()
+        lay = QVBoxLayout(self._mod_box)
+        lay.setContentsMargins(0, 6, 0, 0)
+        lay.setSpacing(5)
+        self._section("MODIFIER CE PROJET", lay)
+        lay.addWidget(self._text(
+            "REPRENDRE ne refait jamais une étape terminée. Pour changer ce qui est déjà "
+            "produit, choisis la partie et dis ce qu'il faut changer : un agent la reprend "
+            "(une exécution, plus les corrections de la vérification), sans refaire le reste.",
+            7, C.TEXT_DIM))
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        self._mod_group = QButtonGroup(self)
+        self._mod_btns: dict[str, QPushButton] = {}
+        for i, (key, text) in enumerate(self._api.MODIFY_TARGETS.items()):
+            b = self._chip(text.replace("&", "&&"))
+            b.setStyleSheet(b.styleSheet() + f"""
+                QPushButton:disabled {{ color: {C.BORDER_B}; border-color: {C.BORDER}; }}
+            """)                                  # a part not produced yet reads as such
+            b.setProperty("target", key)
+            self._mod_group.addButton(b)
+            grid.addWidget(b, i // 3, i % 3)
+            self._mod_btns[key] = b
+        lay.addLayout(grid)
+        self._mod_text = self._area("Ce qu'il faut changer…", lines=3)
+        lay.addWidget(self._mod_text)
+        lay.addWidget(self._text(
+            "Ex. : ajoute une page « Tarifs » · passe l'équipe à 3 développeurs · le paiement "
+            "se fait aussi par virement. Seule la partie choisie change : si c'est le périmètre "
+            "qui bouge, demande-le aussi au chiffrage, au code ou à la présentation.",
+            7, C.TEXT_DIM))
+        self._mod_go = QPushButton("▸  APPLIQUER LA MODIFICATION")
+        self._mod_go.setFixedHeight(32)
+        self._mod_go.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._mod_go.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mod_go.setStyleSheet(self._primary_css)
+        self._mod_go.clicked.connect(self._apply_change)
+        lay.addWidget(self._mod_go)
+        self._mod_msg = self._text("", 8)
+        self._mod_msg.hide()
+        lay.addWidget(self._mod_msg)
+        self._mod_hist = QLabel()
+        self._mod_hist.setTextFormat(Qt.TextFormat.RichText)
+        self._mod_hist.setWordWrap(True)
+        self._mod_hist.setFont(QFont("Courier New", 8))
+        self._mod_hist.setStyleSheet("background: transparent;")
+        lay.addWidget(self._mod_hist)
+        return self._mod_box
 
     # ── Behaviour ──
     def _pick_mode(self, mode: str) -> None:
@@ -3741,20 +4229,133 @@ class DirectionPage(QWidget):
         if why:
             self._say(why, False)
 
+    # ── Earlier projects ──
+    def _fill_answers(self, a: dict) -> None:
+        """The questionnaire as it was answered ({} empties it)."""
+        def pick(group: QButtonGroup, value) -> None:
+            group.setExclusive(False)          # an exclusive group cannot be left empty
+            for b in group.buttons():
+                b.setChecked(b.text() == str(value or ""))
+            group.setExclusive(True)
+        pick(self._q_type, a.get("type"))
+        pick(self._q_cadre, a.get("cadre"))
+        pick(self._q_data, a.get("donnees"))
+        for field, key in ((self._q_besoin, "besoin"), (self._q_must, "indispensable"),
+                           (self._q_later, "plus_tard"), (self._q_notes, "remarques")):
+            field.setPlainText(str(a.get(key) or ""))
+        for field, key in ((self._q_cible, "cible"), (self._q_team, "equipe"),
+                           (self._q_delai, "delai"), (self._q_budget, "budget"),
+                           (self._q_tech, "technique")):
+            field.setText(str(a.get(key) or ""))
+
+    def _open_project(self, slug: str) -> None:
+        """Put a saved project back in the form, as it was launched."""
+        form = self._api.form_of(slug)
+        if not form:
+            self._say("Ce projet n'existe plus sur le disque.", False)
+            return
+        self._name.setText(form["name"])
+        for b in self._lang.buttons():
+            b.setChecked(b.property("language") == form["language"])
+        self._pick_mode(form["mode"])
+        # The brief goes in the free prompt even for a questionnaire: switching
+        # to PROMPT LIBRE then shows it, ready to edit.
+        self._prompt.setPlainText(form["brief"])
+        self._fill_answers(form["answers"])
+        self._ddd_auto_off = False
+        for key, b in self._phase_btns.items():
+            b.setChecked(key in form["phases"])
+        self._mod_text.clear()
+        self._say_mod("")
+        self._say(f"« {form['name']} » rouvert. REPRENDRE fait ce qui reste ; pour changer ce "
+                  f"qui est déjà produit, MODIFIER CE PROJET plus bas.", True)
+        self._refresh()
+
+    def _new_project(self) -> None:
+        self._name.clear()
+        self._prompt.clear()
+        self._fill_answers({})
+        for b in self._lang.buttons():
+            b.setChecked(b.property("language") == "French")
+        self._ddd_auto_off = False
+        for b in self._phase_btns.values():
+            b.setChecked(True)
+        self._pick_mode("libre")
+        self._mod_text.clear()
+        self._say_mod("")
+        self._say("")
+        self._name.setFocus()
+        self._refresh()
+
+    def _say_mod(self, text: str, ok: bool = True) -> None:
+        self._mod_msg.setText(text)
+        self._mod_msg.setStyleSheet(f"color: {C.GREEN if ok else C.RED}; background: transparent;")
+        self._mod_msg.setVisible(bool(text))
+
+    def _apply_change(self) -> None:
+        b = self._mod_group.checkedButton()
+        try:
+            ok, msg = self._api.modify(self._name.text(), b.property("target") if b else "",
+                                       self._mod_text.toPlainText(), player=self.player)
+        except Exception as e:                  # noqa: BLE001 — shown, never fatal
+            ok, msg = False, f"Impossible de lancer : {e}"
+        self._say_mod(msg, ok)
+        if ok:
+            self._mod_text.clear()
+        self._refresh()
+
+    def _paint_modify(self, info: dict) -> None:
+        from html import escape
+        can = set(info.get("modifiable") or ())
+        self._mod_box.setVisible(bool(can))
+        if not can:
+            return
+        checked = self._mod_group.checkedButton()
+        for key, b in self._mod_btns.items():
+            b.setEnabled(key in can)
+            b.setToolTip("" if key in can else "Pas encore produit")
+        if checked is None or checked.property("target") not in can:
+            self._mod_btns[next(k for k in self._api.MODIFY_TARGETS if k in can)].setChecked(True)
+        self._mod_go.setEnabled(not info.get("running"))
+
+        colours = {"done": C.GREEN, "partial": C.ACC2, "running": C.PRI, "failed": C.RED,
+                   "stopped": C.ACC}
+        rows = []
+        for c in reversed(info.get("changes") or ()):
+            st = c.get("status", "")
+            mark = self._PROJ_STATES.get(st, ("·", ""))[0]
+            what = self._api.MODIFY_TARGETS.get(c.get("target", ""), c.get("target", ""))
+            note = (f"<br><span style='color:{C.TEXT_DIM}'>&nbsp;&nbsp;&nbsp;"
+                    f"{escape(str(c['note'])[:180])}</span>" if c.get("note") else "")
+            rows.append(f"<p style='margin:3px 0'><span style='color:{colours.get(st, C.TEXT_DIM)}'>"
+                        f"{mark}</span> <span style='color:{C.TEXT_DIM}'>{self._when(c.get('at', ''))}"
+                        f"</span> <b style='color:{C.TEXT}'>{escape(what)}</b> "
+                        f"<span style='color:{C.TEXT_MED}'>— {escape(str(c.get('request', ''))[:160])}"
+                        f"</span>{note}</p>")
+        html = "".join(rows)
+        if html != self._mod_hist.text():       # the timer ticks every 1.5 s: no needless redraw
+            self._mod_hist.setText(html)
+        self._mod_hist.setVisible(bool(rows))
+
     def _refresh(self) -> None:
         name = self._name.text().strip()
         try:
             info = self._api.follow(name) if name else {"exists": False}
             seen = self._api.lookup(name) if name else {}
+            items = self._api.projects()
         except Exception as e:                  # noqa: BLE001 — a bad state file, not a crash
             print(f"[Direction] {e}")
             return
+        self._fill_projects(items)
+        for slug, b in self._proj_btns.items():
+            b.setChecked(slug == seen.get("slug"))
         running = bool(info.get("running"))
         if not running:
             self._stop_sent = False
         if info.get("exists"):
-            hint = ("Ce projet existe : relancer reprend là où il s'est arrêté, sans rien "
-                    "refaire. Laisse le brief vide pour garder celui enregistré.")
+            hint = ("Ce projet existe : REPRENDRE fait les étapes qui restent, sans rien refaire. "
+                    "Un brief modifié vaut pour la suite ; pour changer ce qui est déjà produit, "
+                    "MODIFIER CE PROJET, plus bas. Brief vide : celui enregistré est gardé.")
         else:
             found = [what for what, key in (("un dossier Scrum", "scrum"),
                                             ("un projet de code", "project")) if seen.get(key)]
@@ -3803,6 +4404,7 @@ class DirectionPage(QWidget):
         found = info.get("outputs") or {}
         for key, b in self._out_btns.items():
             b.setEnabled(key in found)
+        self._paint_modify(info)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -3829,6 +4431,7 @@ class MainWindow(QMainWindow):
     _clipboard_sig  = pyqtSignal(str)        # clipboard text changed (thread-safe)
     _confirm_sig    = pyqtSignal(str, str)   # (title, detail) — irreversible-action gate
     _confirm_hide_sig = pyqtSignal()
+    _compact_sig    = pyqtSignal(int)        # tokens since the last /compact — ask to compact
     _wake_dl_sig    = pyqtSignal(bool, str)  # wake-word install finished (ok, message)
     _quiz_sig       = pyqtSignal(str, object, object)  # (topic, questions, grader)
     _quiz_hide_sig  = pyqtSignal()
@@ -3868,7 +4471,9 @@ class MainWindow(QMainWindow):
         self.on_audio_device_change = None  # callable: () -> None — reopen audio streams
         self.on_memory_reset = None         # callable: () -> None — new session, empty context
         self.on_engine_change = None        # callable: () -> None — new session, other AI engine
+        self.on_compact       = None        # callable: () -> None — /compact the conversation
         self._confirm_overlay  = None   # live ConfirmBanner, if one is on screen
+        self._compact_overlay  = None   # live CompactBanner, if one is on screen
         self.get_plugins       = None   # callable: () -> list[dict], set by JarvisLive
         self.get_plugin_settings = None # callable: () -> list[dict] settings schemas, set by JarvisLive
         self.on_wake_toggle    = None   # callable: (enable: bool) -> str, set by JarvisLive
@@ -3879,6 +4484,9 @@ class MainWindow(QMainWindow):
         self._muted            = False
         self.player            = None   # the JarvisUI wrapping this window, set by it
         self._direction_page: DirectionPage | None = None   # built on first use
+        self._lecture = None                 # actions.lecture.Lecture while a lecture is heard
+        self._lecture_was_muted = False      # the microphone as it was before it
+        self._lecture_timer: QTimer | None = None
         self._current_file: str | None = None
         self._remote_overlay: RemoteKeyOverlay | None = None
         self._customize_overlay: CustomizeOverlay | None = None
@@ -4159,6 +4767,11 @@ class MainWindow(QMainWindow):
         self._camera_sig.connect(self._show_camera_frame)
         self._confirm_sig.connect(self._show_confirm_banner)
         self._confirm_hide_sig.connect(self._hide_confirm_banner)
+        self._compact_sig.connect(self._show_compact_banner)
+        # Closing Jarvis mid-lecture: the recording is closed properly and kept
+        # (python -m actions.lecture "<folder>" finishes it later).
+        QApplication.instance().aboutToQuit.connect(
+            lambda: self._stop_lecture(synthesize=False))
         self._cam_stream_sig.connect(self._on_cam_stream)
         self._cam_frame_sig.connect(self._on_cam_frame)
         self._wake_btns_sig.connect(self._refresh_wake_btns)
@@ -4613,6 +5226,66 @@ class MainWindow(QMainWindow):
                 pass
 
     @staticmethod
+    def _desktop_entry(name: str, exe: str, args: list[str], workdir: str = "",
+                       icon: str = "", extra: str = "") -> str:
+        """A freedesktop .desktop launcher, written to the spec.
+
+        Exec used to be `{python} {script}` as is. A path with a space in it —
+        this project lives in "Projet et cours Ynov" — was then read as the
+        program "/home/…/Projet" plus arguments, and the launcher did nothing.
+        Each Exec argument is now double-quoted, with ", `, $ and \\ escaped
+        inside the quotes (the spec's rule), then \\ escaped again and %
+        doubled because Exec is itself a key-file string. Other values only
+        need \\ and line breaks escaped: spaces are fine there."""
+        def value(text: str) -> str:
+            return str(text).replace("\\", "\\\\").replace("\n", "\\n")
+
+        def arg(text: str) -> str:
+            inner = (str(text).replace("\\", "\\\\").replace('"', '\\"')
+                     .replace("`", "\\`").replace("$", "\\$"))
+            return f'"{inner}"'
+
+        # GLib checks that the program exists before it turns %% back into %,
+        # so a program path with a % in it is never found: /usr/bin/env runs it
+        # instead (measured with `gio launch`; arguments are not checked).
+        argv = ["/usr/bin/env", exe, *args] if "%" in str(exe) else [exe, *args]
+        exec_line = " ".join(arg(a) for a in argv)
+        exec_line = exec_line.replace("\\", "\\\\").replace("%", "%%")
+        lines = ["[Desktop Entry]", "Version=1.0", "Type=Application",
+                 f"Name={value(name)}", "Comment=Assistant vocal JARVIS",
+                 f"Exec={exec_line}", "Terminal=false", "StartupNotify=true",
+                 "Categories=Utility;"]
+        if workdir:
+            lines.append(f"Path={value(workdir)}")
+        if icon:
+            lines.append(f"Icon={value(icon)}")
+        return "\n".join(lines) + "\n" + extra
+
+    @staticmethod
+    def _trust_launcher(path: Path) -> bool:
+        """Mark a launcher on the desktop as allowed to run.
+
+        Ubuntu's desktop (GNOME, Desktop Icons NG) shows a .desktop file it
+        does not trust as a plain unreadable file, executable bit or not, until
+        someone right-clicks it → « Autoriser le lancement ». That is what this
+        does, through gio. False when gio is missing or refuses (another
+        desktop): the file still works from a file manager.
+
+        The snap VS Code terminal leaks GIO_MODULE_DIR (core/snap_compat.py):
+        with it, gio loads the snap's modules, has no metadata support and
+        answers « attribut non pris en charge ». main.py already drops it at
+        start; the call drops it again so it never depends on that."""
+        from core.snap_compat import _SNAP_VARS
+        env = {k: v for k, v in os.environ.items()
+               if not (k in _SNAP_VARS and "/snap/" in v)}
+        try:
+            done = subprocess.run(["gio", "set", str(path), "metadata::trusted", "true"],
+                                  capture_output=True, timeout=5, env=env)
+            return done.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
     def _get_desktop_dir() -> Path:
         """
         Resolve the user's REAL desktop directory instead of assuming
@@ -4785,19 +5458,32 @@ class MainWindow(QMainWindow):
                     except Exception:
                         png_path = ico_path  # fallback to .ico
 
-                icon_line = f"Icon={png_path}\n" if png_path.exists() else ""
-                desk = desktop / "J.A.R.V.I.S.desktop"
-                desk.write_text(
-                    "[Desktop Entry]\n"
-                    "Name=J.A.R.V.I.S\n"
-                    f"Exec={python} {script}\n"
-                    f"Path={script.parent}\n"
-                    "Type=Application\n"
-                    "Terminal=false\n"
-                    "Categories=Utility;\n"
-                    + icon_line
-                )
-                desk.chmod(desk.stat().st_mode | 0o755)
+                entry = self._desktop_entry(
+                    self._assistant_name, str(python), [str(script)],
+                    workdir=str(script.parent),
+                    icon=str(png_path) if png_path.exists() else "")
+                # The same launcher in the applications menu, so Jarvis is
+                # found by search and can be pinned to the dock. Its name
+                # matches setDesktopFileName("jarvis") in JarvisUI: the running
+                # window then takes this icon on the dock.
+                apps = Path.home() / ".local" / "share" / "applications"
+                apps.mkdir(parents=True, exist_ok=True)
+                (apps / "jarvis.desktop").write_text(entry, encoding="utf-8")
+
+                desktop.mkdir(parents=True, exist_ok=True)
+                old = desktop / "J.A.R.V.I.S.desktop"   # what this button used to write
+                if old.is_file():
+                    old.unlink()
+                desk = desktop / "jarvis.desktop"
+                desk.write_text(entry, encoding="utf-8")
+                desk.chmod(0o755)
+                if not self._trust_launcher(desk):
+                    self._log.append_log(
+                        "SYS: Desktop shortcut created — if it shows as a file, right-click it "
+                        "→ « Autoriser le lancement ».")
+                    return
+                self._log.append_log("SYS: Desktop shortcut created (desktop + applications menu).")
+                return
 
             self._log.append_log("SYS: Desktop shortcut created.")
         except Exception as e:
@@ -5146,6 +5832,21 @@ class MainWindow(QMainWindow):
         self._mute_btn.clicked.connect(self._toggle_mute)
         self._style_mute_btn()
         lay.addWidget(self._mute_btn)
+
+        # « Écoute le cours » (actions/lecture.py): this button starts
+        # listening, the same one stops it and the synthesis is made.
+        self._lecture_btn = QPushButton()
+        self._lecture_btn.setFixedHeight(30)
+        self._lecture_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._lecture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._lecture_btn.clicked.connect(self._toggle_lecture)
+        lay.addWidget(self._lecture_btn)
+        self._lecture_info = QLabel()
+        self._lecture_info.setFont(QFont("Courier New", 7))
+        self._lecture_info.setWordWrap(True)
+        self._lecture_info.hide()
+        lay.addWidget(self._lecture_info)
+        self._style_lecture_btn(False)
 
         return w
 
@@ -6042,13 +6743,12 @@ class MainWindow(QMainWindow):
                 if currently_on:
                     desk.unlink(missing_ok=True)
                 else:
-                    desk.write_text(
-                        "[Desktop Entry]\n"
-                        f"Name={self._assistant_name}\n"
-                        f"Exec={sys.executable} {script}\n"
-                        "Type=Application\nTerminal=false\n"
-                        "X-GNOME-Autostart-enabled=true\n"
-                    )
+                    # Same Exec quoting as the desktop shortcut: unquoted, a
+                    # path with a space never started at login.
+                    desk.write_text(self._desktop_entry(
+                        self._assistant_name, sys.executable, [script],
+                        workdir=str(Path(script).parent),
+                        extra="X-GNOME-Autostart-enabled=true\n"), encoding="utf-8")
             enabled = not currently_on
             self._update_autostart_btn(enabled)
             self._log.append_log(
@@ -6399,8 +7099,16 @@ class MainWindow(QMainWindow):
     # ── Memory panel ─────────────────────────────────────────────────────────
 
     def _open_memory_panel(self):
+        old = getattr(self, "_memory_overlay", None)
+        if old is not None:                 # a second click must not stack two panels
+            old.hide()
+            old.deleteLater()
         ov = MemoryOverlay(parent=self.centralWidget())
         ov.reset_done.connect(self._on_memory_reset)
+        ov.field_erased.connect(
+            lambda label, n, deleted: self._log.append_log(
+                f"SYS: Memory — field {label} {'deleted' if deleted else 'emptied'} "
+                f"({n} facts forgotten)."))
         self._centre_overlay(ov)
         self._memory_overlay = ov
 
@@ -6452,6 +7160,32 @@ class MainWindow(QMainWindow):
             resolve(bool(accepted))
         except Exception as e:
             self._log.append_log(f"ERR: Confirmation failed — {e}")
+
+    # ── /compact ─────────────────────────────────────────────────────────────
+
+    def _show_compact_banner(self, since: int):
+        ov = self._compact_overlay
+        if ov is not None:              # still up: only the count moves
+            ov.set_count(since)
+            ov.raise_()
+            return
+        from core import usage
+        ov = CompactBanner(since, usage.compact_every() or usage.COMPACT_EVERY,
+                           parent=self.centralWidget())
+        ov.answered.connect(self._on_compact_answered)
+        self._centre_overlay(ov)
+        self._compact_overlay = ov
+
+    def _on_compact_answered(self, compact: bool):
+        ov = self._compact_overlay
+        self._compact_overlay = None
+        if ov is not None:
+            ov.hide()
+            ov.deleteLater()
+        if compact and self.on_compact:
+            self.on_compact()
+        elif not compact:
+            self._log.append_log("SYS: /compact postponed — type /compact anytime.")
 
     def _open_plugin_manager(self):
         plugins = self.get_plugins() if self.get_plugins else []
@@ -6554,6 +7288,105 @@ class MainWindow(QMainWindow):
                 QPushButton:hover {{ background: #001f10; }}
             """)
 
+    # ── « Écoute le cours » ──────────────────────────────────────────────────
+    # The Live microphone is muted while a lecture is heard: the Live model
+    # would otherwise hear the whole lecture, answer it and bill every minute
+    # of it. The chat stays open. The previous mute state comes back after.
+
+    def _style_lecture_btn(self, on: bool):
+        if on:
+            self._lecture_btn.setStyleSheet(f"""
+                QPushButton {{ background: #1a0006; color: {C.RED};
+                    border: 1px solid {C.RED}; border-radius: 3px; }}
+                QPushButton:hover {{ background: #26000a; }}
+            """)
+            return
+        self._lecture_btn.setText("🎓  ÉCOUTE LE COURS")
+        self._lecture_btn.setToolTip("Jarvis écoute le cours en fond, Gemini prend les notes, "
+                                     "et une synthèse PDF est faite à l'arrêt")
+        self._lecture_btn.setStyleSheet(f"""
+            QPushButton {{ background: {C.PRI_GHO}; color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 3px; }}
+            QPushButton:hover {{ border-color: {C.PRI}; }}
+        """)
+
+    def _toggle_lecture(self):
+        if self._lecture is None:
+            self._start_lecture()
+        else:
+            self._stop_lecture()
+
+    def _start_lecture(self):
+        from actions.lecture import SEGMENT_SECONDS, Lecture
+        lec = Lecture()
+        try:
+            lec.listen()
+        except Exception as e:                       # noqa: BLE001 — said, never fatal
+            self._log.append_log(f"ERR: Écoute du cours — {e}")
+            return
+        self._lecture = lec
+        self._lecture_was_muted = self._muted
+        self._set_muted(True, "— écoute du cours : Jarvis ne répond plus à la voix, "
+                              "le chat reste ouvert.")
+        self._log.append_log(
+            f"SYS: Écoute du cours lancée — Gemini transcrit toutes les "
+            f"{SEGMENT_SECONDS // 60} minutes, dans {lec.folder}. Pense à demander l'accord "
+            f"de l'enseignant avant d'enregistrer.")
+        if self._lecture_timer is None:
+            self._lecture_timer = QTimer(self)
+            self._lecture_timer.setInterval(1000)
+            self._lecture_timer.timeout.connect(self._tick_lecture)
+        self._lecture_timer.start()
+        self._style_lecture_btn(True)
+        self._tick_lecture()
+
+    def _tick_lecture(self):
+        from actions.lecture import SEGMENT_SECONDS, _clock
+        SEGMENT_MIN = SEGMENT_SECONDS // 60
+        lec = self._lecture
+        if lec is None:
+            return
+        self._lecture_btn.setText(f"■  ARRÊTER L'ÉCOUTE · {_clock(lec.elapsed())}")
+        quiet = lec.quiet_for()
+        if quiet > 60:
+            text, colour = (f"⚠ Micro silencieux depuis {int(quiet)} s — vérifie le micro "
+                            f"choisi dans ⚙ AUDIO.", C.ACC2)
+        else:
+            n = lec.transcribed
+            text = (f"● Écoute en cours · {n} segment{'s' if n > 1 else ''} de "
+                    f"{SEGMENT_MIN} min transcrit{'s' if n > 1 else ''} par Gemini")
+            if lec.failed:
+                text += f" · {lec.failed} à refaire à la fin"
+            colour = C.TEXT_MED
+        self._lecture_info.setText(text)
+        self._lecture_info.setStyleSheet(f"color: {colour}; background: transparent;")
+        self._lecture_info.show()
+
+    def _stop_lecture(self, synthesize: bool = True):
+        lec, self._lecture = self._lecture, None
+        if lec is None:
+            return
+        if self._lecture_timer is not None:
+            self._lecture_timer.stop()
+        lec.stop()
+        self._style_lecture_btn(False)
+        self._lecture_info.hide()
+        if not synthesize:
+            return
+        if not self._lecture_was_muted:
+            self._set_muted(False, "— fin de l'écoute du cours.")
+        from actions.lecture import _clock
+        from core import jobs
+        self._log.append_log(f"SYS: Écoute arrêtée après {_clock(lec.elapsed())} — synthèse "
+                             f"en cours, le PDF s'ouvrira tout seul.")
+
+        def work(progress) -> str:
+            pdf = lec.finish(progress)
+            return (f"The synthesis of the lecture the user just recorded is ready and open: "
+                    f"{pdf.name}, in {pdf.parent}. Tell them in one short sentence, in their "
+                    f"language.")
+        jobs.start(self.player, "COURS — synthèse", work)
+
     def _send(self):
         txt = self._input.text().strip()
         if not txt: return
@@ -6615,6 +7448,9 @@ class JarvisUI:
     def __init__(self, size=None):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        # The window's app id on Wayland: GNOME matches it to jarvis.desktop
+        # (CREATE DESKTOP SHORTCUT) and shows its icon on the dock.
+        self._app.setDesktopFileName("jarvis")
         self._win = MainWindow()
         # Background jobs started from the window (Direction Projet) report
         # through this object, like the ones the voice tools start.
@@ -6690,6 +7526,19 @@ class JarvisUI:
     @on_engine_change.setter
     def on_engine_change(self, cb):
         self._win.on_engine_change = cb
+
+    @property
+    def on_compact(self):
+        return self._win.on_compact
+
+    @on_compact.setter
+    def on_compact(self, cb):
+        self._win.on_compact = cb
+
+    def ask_compact(self, since: int) -> None:
+        """Thread-safe: ask whether to /compact. core/usage calls it from
+        whichever thread counted the tokens that crossed the line."""
+        self._win._compact_sig.emit(int(since))
 
     def show_confirm(self, title: str, detail: str) -> None:
         """Thread-safe: raise the irreversible-action gate. Called from action

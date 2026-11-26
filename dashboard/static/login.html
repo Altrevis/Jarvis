@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#07090f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="JARVIS">
   <title>JARVIS</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -15,17 +20,24 @@
       --text:   #dde3ed;
       --muted:  #5e6a7e;
     }
-    html, body {
-      height: 100%;
+    html { height: 100%; background: var(--bg); -webkit-text-size-adjust: 100%; }
+    /* min-height, not height: with the keyboard open the card may be taller
+       than what is left of the screen, and the page has to scroll to it. */
+    body {
+      min-height: 100%;
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+               calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
     }
+    button, input { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
     .card {
-      width: 340px;
+      width: 100%;
+      max-width: 340px;           /* was a fixed 340px: wider than a small phone */
       padding: 44px 36px;
       background: var(--card);
       border: 1px solid var(--border);
@@ -102,7 +114,7 @@
       cursor: pointer;
       transition: opacity 0.15s, transform 0.1s;
     }
-    .btn:hover  { opacity: 0.88; }
+    @media (hover: hover) { .btn:hover { opacity: 0.88; } }
     .btn:active { transform: scale(0.98); }
     @keyframes shake {
       0%,100% { transform: translateX(0); }
@@ -116,6 +128,7 @@
       margin-top: 20px;
       line-height: 1.6;
       text-align: left;
+      overflow-wrap: anywhere;
     }
     .voice-note code {
       background: rgba(255,255,255,0.07);
@@ -129,6 +142,13 @@
       color: var(--muted);
       font-size: 12px;
       margin-bottom: 16px;
+    }
+    /* ── PHONE ── */
+    @media (max-width: 400px) {
+      .card { padding: 32px 20px; border-radius: 18px; }
+      .logo { font-size: 24px; letter-spacing: 8px; }
+      .hint { margin-bottom: 22px; }
+      .key-input { font-size: 26px; letter-spacing: 8px; padding: 16px 10px; }
     }
   </style>
 </head>

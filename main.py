@@ -66,7 +66,7 @@ from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
-    search_memory, set_trim_notifier,
+    search_memory, set_trim_notifier, file_category,
 )
 
 # The file-backed tools (open_app, web_search, browser_control, …) are no longer
@@ -93,6 +93,7 @@ from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
+from core                      import usage
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.wake_word            import (
@@ -659,6 +660,8 @@ class JarvisLive:
         self.ui.on_audio_device_change = self._on_audio_device_change
         self.ui.on_memory_reset   = self._on_memory_reset     # MEMORY → RESET ALL
         self.ui.on_engine_change  = self._on_engine_change    # CLAUDE ↔ GEMINI → rebuild session
+        self.ui.on_compact        = self.compact              # /compact banner → compact
+        usage.set_compact_notifier(self._on_compact_due)      # every 400k tokens → ask
         self._reconnect_event: asyncio.Event | None = None
         self._reconnect_keep = True   # False → next rebuild drops the resumption handle
 
@@ -684,6 +687,11 @@ class JarvisLive:
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
+        # What /compact kept of the conversation: written into the system
+        # prompt of every fresh session from then on, so the thread survives
+        # the context it replaces. RAM only, like the resumption handle.
+        self._compact_summary = ""
+        self._compacting      = False
 
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
@@ -890,7 +898,103 @@ class JarvisLive:
         or shutting down would write a summary of the erased conversation back
         into the fresh memory."""
         self._session_log = []
+        self._compact_summary = ""      # a summary of the erased conversation, too
         self.request_reconnect(keep_context=False, reason="memory reset")
+
+    # ── /compact ─────────────────────────────────────────────────────────────
+    # Every turn of the Live conversation re-reads everything said so far, so
+    # a long session costs more per turn the longer it runs. /compact does what
+    # it does in Claude Code: the conversation is summarized, and a fresh
+    # session starts from the summary (in its system prompt) instead of from
+    # the full history. Asked for every `usage.compact_every()` tokens, by a
+    # banner; typed as /compact in the chat at any time.
+    #
+    # The agent runs (projects, documents, Direction Projet) need none of it:
+    # each one already starts from an empty context.
+
+    def compact(self):
+        """/compact — from the banner or the chat. Any thread."""
+        loop = getattr(self, "_loop", None)
+        if loop is None or not loop.is_running():
+            usage.compact_done()        # nothing to compact yet: the count starts over
+            return
+        asyncio.run_coroutine_threadsafe(self._compact(), loop)
+
+    def _on_compact_due(self, since: int):
+        """core/usage: another compact_every() tokens are spent. Any thread."""
+        self.ui.ask_compact(since)
+
+    async def _compact(self) -> None:
+        if self._compacting:
+            return
+        self._compacting = True
+        try:
+            log = list(self._session_log)
+            summary = self._compact_summary
+            if len(log) >= 2:
+                self.ui.write_log("SYS: /compact — summarizing the conversation…")
+                fresh = await asyncio.to_thread(self._summarize_for_compact, log, summary)
+                if not fresh:
+                    # Dropping the context without a summary would lose the
+                    # conversation outright: keep it, and say so.
+                    self.ui.write_log("SYS: /compact failed — no summary could be made; "
+                                      "the conversation is kept as it is.")
+                    return
+                summary = fresh
+            self._compact_summary = summary
+            # The summary stands in for the turns it covers, for the end-of-
+            # session summary too — one line, so this reconnect saves none.
+            self._session_log = [f"(Earlier in this conversation) {summary}"] if summary else []
+            await asyncio.to_thread(usage.compact_done)
+            self.ui.write_log(f"SYS: /compact — {len(log)} turns kept as a "
+                              f"{len(summary)}-character summary.")
+            # Dropped here as well as by the reconnect: if the session is down
+            # right now, the next connect must not resume the old context.
+            self._resume_handle = None
+            self.request_reconnect(keep_context=False, reason="/compact")
+        finally:
+            self._compacting = False
+
+    def _summarize_for_compact(self, log: list[str], previous: str) -> str:
+        """The conversation as the short brief a fresh session starts from.
+        On the FAST tier: a summary does not need the large model, and this
+        runs every few hundred thousand tokens. '' when nothing answered."""
+        turns, size = [], 0
+        for line in reversed(log):              # the most recent turns first
+            line = line[:800]
+            if size + len(line) > 24_000:
+                break
+            turns.append(line)
+            size += len(line)
+        turns.reverse()
+        prompt = (
+            f"Below is a voice conversation between a user and their assistant "
+            f"{self._asst_name}. It is being compacted: a fresh session will continue "
+            f"from your summary alone. Keep what the next turns need — what the user "
+            f"asked for and decided, what is still in progress or was promised, and the "
+            f"exact names, numbers, files and dates involved. Drop greetings and small "
+            f"talk. At most 12 short lines, in the language of the conversation, calling "
+            f"the user 'the user' in that language. Output only the summary.\n\n"
+            + (f"SUMMARY OF THE TURNS BEFORE THESE:\n{previous}\n\n" if previous else "")
+            + "CONVERSATION:\n" + "\n".join(turns))
+        try:
+            return (_gemini.text(prompt, _gemini.FAST, None, 30_000) or "").strip()[:2500]
+        except Exception as e:
+            print(f"[Compact] summary failed: {e}")
+            return ""
+
+    def _record_live_usage(self, um) -> None:
+        """One Live turn into core/usage, off the receive loop. Each turn
+        re-reads the whole conversation, so this is the count that grows with
+        a long session — and the one /compact brings back down."""
+        cached = int(getattr(um, "cached_content_token_count", 0) or 0)
+        tin = max(0, int(getattr(um, "prompt_token_count", 0) or 0)
+                  + int(getattr(um, "tool_use_prompt_token_count", 0) or 0) - cached)
+        tout = (int(getattr(um, "response_token_count", 0) or 0)
+                + int(getattr(um, "thoughts_token_count", 0) or 0))
+        if tin or tout or cached:
+            threading.Thread(target=usage.record, args=("gemini-live", tin, tout, cached),
+                             daemon=True, name="usage-live").start()
 
     def _on_engine_change(self):
         """Claude ↔ Gemini switched in ⚙ SETUP → CLAUDE. The engine is written
@@ -934,6 +1038,11 @@ class JarvisLive:
         return url, key, f"{url}/auto-login?key={key}", manual
 
     def _on_text_command(self, text: str):
+        if text.strip().lower() == "/compact":
+            # A command for the app, not a message for the model — and allowed
+            # while asleep: compacting does not need anyone to answer.
+            self.compact()
+            return
         if not self._loop or not self.session:
             return
         # Respect wake-word sleep: a typed command must not be answered while
@@ -1131,6 +1240,11 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        if self._compact_summary:
+            parts.append(
+                "[THE CONVERSATION SO FAR — compacted with /compact to save tokens. "
+                "Carry on from it as if you remembered it; do not mention the "
+                "compaction unless asked]\n" + self._compact_summary + "\n")
         parts.append(sys_prompt)
 
         cfg = dict(
@@ -1246,7 +1360,9 @@ class JarvisLive:
         _failed = False
 
         if name == "save_memory":
-            category = args.get("category", "notes")
+            # A field the user deleted in the MEMORY panel stays deleted: what
+            # the model would file there goes to Notes instead.
+            category = file_category(args.get("category", "notes"))
             key      = args.get("key", "")
             value    = args.get("value", "")
             if key and value:
@@ -1640,6 +1756,12 @@ class JarvisLive:
                             if self._resume_handle is None:
                                 print("[JARVIS] 🔗 Session resumption armed")
                             self._resume_handle = _sru.new_handle
+
+                    # What the turn cost: counted for the ledger and for the
+                    # /compact question (core/usage).
+                    _um = getattr(response, "usage_metadata", None)
+                    if _um is not None:
+                        self._record_live_usage(_um)
 
                     if response.data:
                         if self._interrupted:

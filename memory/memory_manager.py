@@ -54,6 +54,29 @@ def _empty_memory() -> dict:
         "notes":         {},
     }
 
+
+# The fields a new memory starts with, which save_memory's description names
+# to the model. Any other dict at the top of long_term.json is a field the
+# user made in the MEMORY panel; "sessions" is a list, not a field.
+BUILTIN_FIELDS = tuple(_empty_memory())
+# The built-in fields the user deleted in the panel, kept as a list under this
+# key — without it load_memory would put them straight back, as it does for a
+# file written by an older version. RESET ALL brings them all back.
+_REMOVED_KEY = "_removed"
+_RESERVED_FIELDS = {"sessions", _REMOVED_KEY}
+# How the MEMORY panel names them (the user's own fields show their key).
+FIELD_LABELS = {"identity": "Identité", "preferences": "Préférences", "projects": "Projets",
+                "relationships": "Relations", "wishes": "Envies", "notes": "Notes"}
+
+
+def field_label(key: str) -> str:
+    return FIELD_LABELS.get(key) or key.replace("_", " ").capitalize()
+
+
+def _removed(memory: dict) -> list[str]:
+    found = memory.get(_REMOVED_KEY)
+    return [k for k in found if k in BUILTIN_FIELDS] if isinstance(found, list) else []
+
 def load_memory() -> dict:
     if not MEMORY_PATH.exists():
         return _empty_memory()
@@ -62,8 +85,9 @@ def load_memory() -> dict:
             data = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 base = _empty_memory()
+                removed = _removed(data)
                 for key in base:
-                    if key not in data:
+                    if key not in data and key not in removed:
                         data[key] = {}
                 return data
             return _empty_memory()
@@ -191,6 +215,24 @@ _IDENTITY_FIELDS = ["name", "age", "birthday", "city", "job",
                     "language", "school", "nationality"]
 
 
+def custom_fields(memory: dict | None = None) -> list[str]:
+    """The fields the user made in the MEMORY panel, alphabetical."""
+    memory = load_memory() if memory is None else memory
+    return sorted(k for k, v in memory.items()
+                  if isinstance(v, dict) and k not in BUILTIN_FIELDS
+                  and k not in _RESERVED_FIELDS)
+
+
+def _prompt_labels(memory: dict) -> dict[str, str]:
+    """The categories that compete for the prompt: the built-in ones, then the
+    user's own fields under a readable label. Without the second half a fact
+    filed in a new field would never reach the prompt or its index."""
+    labels = dict(_CATEGORY_LABELS)
+    for key in custom_fields(memory):
+        labels[key] = _pretty(key).capitalize()
+    return labels
+
+
 def format_memory_for_prompt(memory: dict | None) -> str:
     """Build the memory block that goes into the system prompt.
 
@@ -216,6 +258,8 @@ def format_memory_for_prompt(memory: dict | None) -> str:
     if not memory:
         return ""
 
+    labels  = _prompt_labels(memory)
+    customs = custom_fields(memory)
     core_lines: list[str] = []
 
     # 1. Identity - always, in full
@@ -242,7 +286,7 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
     # 2. Everything else, most recently updated first
     rest: list[tuple[str, str, str, str]] = []   # (updated, cat, key, value)
-    for cat in _CATEGORY_LABELS:
+    for cat in labels:
         for key, entry in (memory.get(cat, {}) or {}).items():
             val = _entry_value(entry)
             if not val:
@@ -278,7 +322,7 @@ def format_memory_for_prompt(memory: dict | None) -> str:
     # about — would fall off the end.
     indexed: list[str] = []
     if overflow:
-        cats  = [c for c in _CATEGORY_LABELS if overflow.get(c)]
+        cats  = [c for c in labels if overflow.get(c)]
         cursor = {c: 0 for c in cats}
         while cats:
             for cat in list(cats):
@@ -289,13 +333,13 @@ def format_memory_for_prompt(memory: dict | None) -> str:
                 indexed.append(overflow[cat][i])
                 cursor[cat] = i + 1
 
-    for cat, label in _CATEGORY_LABELS.items():
+    for cat, label in labels.items():
         if shown.get(cat):
             core_lines.append("")
             core_lines.append(f"{label}:")
             core_lines.extend(shown[cat])
 
-    if not core_lines and not indexed:
+    if not core_lines and not indexed and not customs:
         return ""
 
     out = [
@@ -320,6 +364,13 @@ def format_memory_for_prompt(memory: dict | None) -> str:
             out.append(", ".join(names)
                        + (f" (+{len(indexed) - len(names)} more)"
                           if len(indexed) > len(names) else ""))
+
+    # 4. The fields the user made, by name, even empty: a field the model does
+    #    not know about is one it never files anything in.
+    if customs:
+        out.append("")
+        out.append("[MEMORY FIELDS THE USER CREATED — when a fact belongs in one, "
+                   "pass its name as save_memory's category: " + ", ".join(customs) + "]")
 
     return "\n".join(out) + "\n"
 
@@ -401,10 +452,19 @@ def all_entries_for_ui() -> list[dict]:
     rows.sort(key=lambda r: (r["updated"] or "0000-00-00"), reverse=True)
     return rows
 
+def file_category(category: str, memory: dict | None = None) -> str:
+    """Where a fact saved by the model (or a tool) goes: its category when
+    that field exists, else Notes. A field the user deleted is not brought
+    back by the next fact the model files in it, and a category the model
+    made up does not become a field: fields are the user's to make."""
+    memory = load_memory() if memory is None else memory
+    if category not in _RESERVED_FIELDS and isinstance(memory.get(category), dict):
+        return category
+    return "notes"
+
+
 def remember(key: str, value: str, category: str = "notes") -> str:
-    valid = {"identity", "preferences", "projects", "relationships", "wishes", "notes"}
-    if category not in valid:
-        category = "notes"
+    category = file_category(category)
     update_memory({category: {key: {"value": value}}})
     return f"Remembered: {category}/{key} = {value}"
 
@@ -449,6 +509,105 @@ def reset_memory() -> int:
                                encoding="utf-8")
     print(f"[Memory] 🧹 Reset — {count} facts forgotten (backup: {BACKUP_PATH.name})")
     return count
+
+
+# ── Fields, for the MEMORY panel ─────────────────────────────────────────────
+#
+# What the panel can do besides RESET ALL: pick a field, make a new one, empty
+# or remove one, add or correct a fact by hand. Messages are in French: the
+# panel shows them as they are.
+
+def field_key(name: str) -> str:
+    """'Cours Ynov' -> 'cours_ynov': how a field, or a fact, is stored."""
+    return re.sub(r"[^\w]+", "_", str(name or "").strip().lower()).strip("_")[:40]
+
+
+def _count(items) -> int:
+    return sum(1 for e in (items or {}).values() if _entry_value(e))
+
+
+def list_fields() -> list[dict]:
+    """Every field and how many facts it holds: the built-in ones still there,
+    in their usual order, then the user's own."""
+    memory = load_memory()
+    keys = [k for k in BUILTIN_FIELDS if isinstance(memory.get(k), dict)]
+    return [{"key": key, "count": _count(memory.get(key)), "builtin": key in BUILTIN_FIELDS}
+            for key in (*keys, *custom_fields(memory))]
+
+
+def create_field(name: str) -> str:
+    """A new, empty field. Returns its key; raises ValueError. The name of a
+    built-in field that was deleted (« Envies », « wishes ») brings that
+    field back rather than making a look-alike."""
+    key = field_key(name)
+    if not key:
+        raise ValueError("Donne un nom au champ.")
+    if key in _RESERVED_FIELDS or name.strip() == _REMOVED_KEY:
+        raise ValueError(f"« {key} » est réservé : choisis un autre nom.")
+    memory = load_memory()
+    removed = _removed(memory)
+    back = next((k for k in removed if key in (k, field_key(field_label(k)))), "")
+    key = back or key
+    if isinstance(memory.get(key), dict) or any(
+            key == field_key(field_label(k)) for k in BUILTIN_FIELDS if k in memory):
+        raise ValueError(f"Le champ « {field_label(key) if back else name.strip()} » existe déjà.")
+    memory[key] = {}
+    if back:
+        memory[_REMOVED_KEY] = [k for k in removed if k != back]
+    save_memory(memory)
+    print(f"[Memory] ➕ Field {'restored' if back else 'created'}: {key}")
+    return key
+
+
+def delete_field(key: str, keep: bool = False) -> int:
+    """Erase every fact of a field, and the field with them unless `keep`
+    (« vider »: it stays, empty). Any field can go, built-in ones included:
+    those are listed under _REMOVED_KEY so they stay gone. Returns how many
+    facts were erased. The file before is kept as long_term.backup.json, as a
+    full reset keeps it."""
+    memory = load_memory()
+    items = memory.get(key)
+    if not isinstance(items, dict) or key in _RESERVED_FIELDS:
+        return 0
+    count = _count(items)
+    with _lock:
+        if MEMORY_PATH.exists():
+            BACKUP_PATH.write_bytes(MEMORY_PATH.read_bytes())
+    if keep:
+        memory[key] = {}
+    else:
+        del memory[key]
+        if key in BUILTIN_FIELDS:
+            memory[_REMOVED_KEY] = sorted({*_removed(memory), key})
+    save_memory(memory)
+    print(f"[Memory] 🧹 Field {key} {'emptied' if keep else 'deleted'}: {count} facts "
+          f"(backup: {BACKUP_PATH.name})")
+    return count
+
+
+def set_fact(category: str, key: str, value: str,
+             old: tuple[str, str] | None = None) -> str:
+    """Add or correct one fact by hand. `old` is the (category, key) it
+    replaces when an existing fact was edited — renamed, or moved to another
+    field. Returns the key it is stored under; raises ValueError."""
+    key = field_key(key)
+    value = " ".join(str(value or "").split())
+    if not key:
+        raise ValueError("Donne un nom à ce fait (ex. : prénom de ma sœur).")
+    if not value:
+        raise ValueError("Écris ce que Jarvis doit retenir.")
+    memory = load_memory()
+    if not category:
+        raise ValueError("Il n'y a plus aucun champ : crée-en un avec ＋ NOUVEAU CHAMP.")
+    if not isinstance(memory.get(category), dict) or category in _RESERVED_FIELDS:
+        raise ValueError(f"Le champ « {field_label(category)} » n'existe pas.")
+    if old and tuple(old) != (category, key) and isinstance(memory.get(old[0]), dict):
+        memory[old[0]].pop(old[1], None)
+    memory[category][key] = {"value": _truncate_value(value),
+                             "updated": datetime.now().strftime("%Y-%m-%d")}
+    save_memory(memory)
+    print(f"[Memory] ✎ {category}/{key} set by hand")
+    return key
 
 
 # ── Session memory ─────────────────────────────────────────────────────────────
